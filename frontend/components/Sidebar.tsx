@@ -1,7 +1,8 @@
-import { Plus, MessageSquare, Trash2, X, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Plus, MessageSquare, Trash2, X, PanelLeftClose, PanelLeftOpen, LogIn, UserPlus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { useEffect, useState } from 'react';
+import { SignedIn, SignedOut, SignInButton, SignUpButton, UserButton } from '@clerk/nextjs';
 
 export interface HistoryItem {
     id: string;
@@ -182,17 +183,72 @@ export function Sidebar({
                     ))}
                 </div>
 
-                {/* Footer */}
+                {/* Footer - Auth Section */}
                 <div className="p-4 border-t border-border">
-                    <div className={cn("flex items-center rounded-lg transition-colors hover:bg-accent cursor-pointer", isDesktopCollapsed ? "justify-center p-2" : "space-x-3 px-2 py-2")}>
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-primary to-orange-400 border border-primary/20 flex-shrink-0" />
-                        {!isDesktopCollapsed && (
-                            <div className="flex-1 overflow-hidden">
-                                <p className="text-sm font-medium text-foreground truncate">Admin User</p>
-                                <p className="text-xs text-muted-foreground truncate">Free Plan</p>
-                            </div>
-                        )}
-                    </div>
+                    {/* Signed Out State */}
+                    <SignedOut>
+                        <div className={cn(
+                            "flex gap-2",
+                            isDesktopCollapsed ? "flex-col items-center" : "flex-col"
+                        )}>
+                            <SignInButton mode="modal">
+                                <button
+                                    className={cn(
+                                        "flex items-center justify-center gap-2 rounded-xl font-medium transition-all duration-200 active:scale-95",
+                                        "bg-gradient-to-r from-orange-500 to-orange-600 text-white",
+                                        "hover:from-orange-600 hover:to-orange-700",
+                                        "shadow-md shadow-orange-500/20",
+                                        isDesktopCollapsed ? "p-3" : "py-2.5 px-4 w-full"
+                                    )}
+                                    title="Sign In"
+                                >
+                                    <LogIn className="w-4 h-4" />
+                                    {!isDesktopCollapsed && <span>Sign In</span>}
+                                </button>
+                            </SignInButton>
+                            <SignUpButton mode="modal">
+                                <button
+                                    className={cn(
+                                        "flex items-center justify-center gap-2 rounded-xl font-medium transition-all duration-200 active:scale-95",
+                                        "bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100",
+                                        "hover:border-orange-500 hover:text-orange-600 dark:hover:text-orange-400",
+                                        "shadow-md border border-zinc-200 dark:border-zinc-700",
+                                        isDesktopCollapsed ? "p-3" : "py-2.5 px-4 w-full"
+                                    )}
+                                    title="Sign Up"
+                                >
+                                    <UserPlus className="w-4 h-4" />
+                                    {!isDesktopCollapsed && <span>Sign Up</span>}
+                                </button>
+                            </SignUpButton>
+                        </div>
+                    </SignedOut>
+
+                    {/* Signed In State */}
+                    <SignedIn>
+                        <div className={cn(
+                            "flex items-center rounded-lg",
+                            isDesktopCollapsed ? "justify-center p-2" : "space-x-3 px-2 py-2"
+                        )}>
+                            <UserButton
+                                appearance={{
+                                    elements: {
+                                        avatarBox: "w-8 h-8",
+                                        userButtonPopoverCard: "bg-zinc-900 border border-zinc-800",
+                                        userButtonPopoverActionButton: "hover:bg-zinc-800",
+                                        userButtonPopoverActionButtonText: "text-zinc-100",
+                                        userButtonPopoverFooter: "hidden"
+                                    }
+                                }}
+                            />
+                            {!isDesktopCollapsed && (
+                                <div className="flex-1 overflow-hidden">
+                                    <p className="text-sm font-medium text-foreground truncate">Account</p>
+                                    <p className="text-xs text-muted-foreground truncate">Manage profile</p>
+                                </div>
+                            )}
+                        </div>
+                    </SignedIn>
                 </div>
             </motion.div>
         </>
