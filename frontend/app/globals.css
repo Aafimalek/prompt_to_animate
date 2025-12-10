@@ -91,4 +91,44 @@
   body {
     @apply bg-background text-foreground antialiased selection:bg-zinc-800 selection:text-white;
   }
+
+  /* Custom Scrollbar - Minimal & Clean */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  *:hover {
+    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+  }
+
+  /* Webkit browsers (Chrome, Safari, Edge) */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 3px;
+    transition: background 0.2s ease;
+  }
+
+  *:hover::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.3);
+  }
+
+  *:hover::-webkit-scrollbar-thumb:hover {
+    background: hsl(24 95% 53% / 0.6);
+    /* Orange accent on hover */
+  }
+
+  *:hover::-webkit-scrollbar-thumb:active {
+    background: hsl(24 95% 53% / 0.8);
+    /* Brighter orange when dragging */
+  }
 }

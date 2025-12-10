@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Wand2, ChevronDown, Download, Loader2, Code, Share2 } from 'lucide-react';
+import { Wand2, ChevronDown, Download, Loader2, Code, Share2, Check, Sparkles, Cpu, Film, Package } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { HistoryItem } from './Sidebar';
@@ -9,6 +9,23 @@ interface AnimationGeneratorProps {
     onGenerateComplete: (data: HistoryItem) => void;
 }
 
+interface ProgressStep {
+    step: number;
+    status: string;
+    message: string;
+    video_url?: string;
+    code?: string;
+}
+
+const PROGRESS_STEPS = [
+    { id: 1, label: 'Analyzing Prompt', icon: Sparkles },
+    { id: 2, label: 'Generating Code', icon: Code },
+    { id: 3, label: 'Code Ready', icon: Check },
+    { id: 4, label: 'Rendering Frames', icon: Film },
+    { id: 5, label: 'Finalizing Video', icon: Package },
+    { id: 6, label: 'Complete', icon: Check },
+];
+
 export function AnimationGenerator({ initialData, onGenerateComplete }: AnimationGeneratorProps) {
     const [prompt, setPrompt] = useState('');
     const [length, setLength] = useState('Short (5s)');
@@ -17,6 +34,7 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
     const [code, setCode] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+    const [currentProgress, setCurrentProgress] = useState<ProgressStep | null>(null);
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -49,9 +67,10 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
         setVideoUrl(null);
         setError(null);
         setCode(null);
+        setCurrentProgress(null);
 
         try {
-            const response = await fetch('http://localhost:8000/generate', {
+            const response = await fetch('http://localhost:8000/generate-stream', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -60,25 +79,53 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
             });
 
             if (!response.ok) {
-                throw new Error('Failed to generate animation');
+                throw new Error('Failed to start generation');
             }
 
-            const data = await response.json();
-            setVideoUrl(data.video_url);
-            setCode(data.code);
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder();
 
-            // Notify parent to save history
-            onGenerateComplete({
-                id: crypto.randomUUID(),
-                prompt: prompt,
-                timestamp: Date.now(),
-                videoUrl: data.video_url,
-                code: data.code
-            });
+            if (!reader) {
+                throw new Error('No response body');
+            }
 
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n');
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data: ProgressStep = JSON.parse(line.slice(6));
+                            setCurrentProgress(data);
+
+                            if (data.status === 'complete' && data.video_url && data.code) {
+                                setVideoUrl(data.video_url);
+                                setCode(data.code);
+                                setLoading(false);
+
+                                // Notify parent to save history
+                                onGenerateComplete({
+                                    id: crypto.randomUUID(),
+                                    prompt: prompt,
+                                    timestamp: Date.now(),
+                                    videoUrl: data.video_url,
+                                    code: data.code
+                                });
+                            } else if (data.status === 'error') {
+                                throw new Error(data.message);
+                            }
+                        } catch (parseError) {
+                            // Ignore parse errors for incomplete chunks
+                        }
+                    }
+                }
+            }
         } catch (err: any) {
             setError(err.message || 'Something went wrong');
-        } finally {
             setLoading(false);
         }
     };
@@ -122,9 +169,9 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
                             }}
                         />
 
-                        <div className="flex items-center justify-between gap-3 border-t border-zinc-100 dark:border-zinc-800 pt-3 relative z-20">
+                        <div className="flex items-center justify-between gap-3 border-t border-zinc-100 dark:border-zinc-800 pt-3">
                             {/* Custom Dropdown */}
-                            <div className="relative custom-dropdown-container">
+                            <div className="relative custom-dropdown-container z-50">
                                 <button
                                     onClick={() => setIsDropdownOpen(!isDropdownOpen)}
                                     className={cn(
@@ -144,11 +191,11 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
                                 <AnimatePresence>
                                     {isDropdownOpen && (
                                         <motion.div
-                                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                            initial={{ opacity: 0, y: -10, scale: 0.95 }}
                                             animate={{ opacity: 1, y: 0, scale: 1 }}
-                                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                            exit={{ opacity: 0, y: -10, scale: 0.95 }}
                                             transition={{ duration: 0.15, ease: "easeOut" }}
-                                            className="absolute top-full left-0 mt-2 w-40 p-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl shadow-xl overflow-hidden z-50 origin-top-left"
+                                            className="absolute bottom-full left-0 mb-2 w-40 p-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl shadow-xl overflow-hidden z-50 origin-bottom-left"
                                         >
                                             <div className="flex flex-col space-y-0.5">
                                                 {lengths.map((l) => (
@@ -219,15 +266,108 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
                         )}
 
                         {loading && !videoUrl && !error && (
-                            <div className="w-full aspect-video rounded-2xl bg-card border border-border flex flex-col items-center justify-center space-y-6">
-                                <div className="relative">
-                                    <div className="w-16 h-16 border-2 border-zinc-800 rounded-full" />
-                                    <div className="absolute inset-0 w-16 h-16 border-2 border-t-foreground rounded-full animate-spin" />
+                            <div className="w-full rounded-2xl bg-card border border-border p-8">
+                                {/* Progress Steps */}
+                                <div className="space-y-4">
+                                    {PROGRESS_STEPS.map((step, index) => {
+                                        const Icon = step.icon;
+                                        const isActive = currentProgress?.step === step.id;
+                                        const isComplete = currentProgress ? currentProgress.step > step.id : false;
+                                        const isPending = currentProgress ? currentProgress.step < step.id : true;
+
+                                        return (
+                                            <motion.div
+                                                key={step.id}
+                                                initial={{ opacity: 0, x: -20 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                transition={{ delay: index * 0.1 }}
+                                                className={cn(
+                                                    "flex items-center space-x-4 p-4 rounded-xl transition-all duration-500",
+                                                    isActive && "bg-orange-500/10 border border-orange-500/30",
+                                                    isComplete && "bg-green-500/10 border border-green-500/20",
+                                                    isPending && "opacity-40"
+                                                )}
+                                            >
+                                                {/* Step Icon */}
+                                                <div className={cn(
+                                                    "w-10 h-10 rounded-full flex items-center justify-center transition-all duration-500",
+                                                    isActive && "bg-orange-500 text-white shadow-lg shadow-orange-500/30",
+                                                    isComplete && "bg-green-500 text-white",
+                                                    isPending && "bg-zinc-800 text-zinc-500"
+                                                )}>
+                                                    {isActive ? (
+                                                        <motion.div
+                                                            animate={{ rotate: 360 }}
+                                                            transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                                                        >
+                                                            <Loader2 className="w-5 h-5" />
+                                                        </motion.div>
+                                                    ) : isComplete ? (
+                                                        <Check className="w-5 h-5" />
+                                                    ) : (
+                                                        <Icon className="w-5 h-5" />
+                                                    )}
+                                                </div>
+
+                                                {/* Step Info */}
+                                                <div className="flex-1">
+                                                    <p className={cn(
+                                                        "font-medium transition-colors",
+                                                        isActive && "text-orange-500",
+                                                        isComplete && "text-green-500",
+                                                        isPending && "text-zinc-500"
+                                                    )}>
+                                                        {step.label}
+                                                    </p>
+                                                    {isActive && currentProgress && (
+                                                        <motion.p
+                                                            initial={{ opacity: 0 }}
+                                                            animate={{ opacity: 1 }}
+                                                            className="text-sm text-muted-foreground mt-0.5"
+                                                        >
+                                                            {currentProgress.message}
+                                                        </motion.p>
+                                                    )}
+                                                </div>
+
+                                                {/* Step Number */}
+                                                <span className={cn(
+                                                    "text-xs font-mono",
+                                                    isActive && "text-orange-400",
+                                                    isComplete && "text-green-400",
+                                                    isPending && "text-zinc-600"
+                                                )}>
+                                                    {String(step.id).padStart(2, '0')}
+                                                </span>
+                                            </motion.div>
+                                        );
+                                    })}
                                 </div>
-                                <div className="text-center space-y-2">
-                                    <p className="text-foreground font-medium">Weaving magic...</p>
-                                    <p className="text-muted-foreground text-sm">Generating code & rendering frames</p>
+
+                                {/* Animated Gradient Bar */}
+                                <div className="mt-6 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                                    <motion.div
+                                        className="h-full bg-gradient-to-r from-orange-500 via-yellow-500 to-orange-500 rounded-full"
+                                        initial={{ width: "0%" }}
+                                        animate={{
+                                            width: currentProgress ? `${(currentProgress.step / 6) * 100}%` : "5%"
+                                        }}
+                                        transition={{ duration: 0.5, ease: "easeOut" }}
+                                    />
                                 </div>
+
+                                {/* Fun Message */}
+                                <motion.p
+                                    key={currentProgress?.step}
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className="text-center text-sm text-muted-foreground mt-4"
+                                >
+                                    {currentProgress?.step === 2 && "✨ The AI is crafting your animation..."}
+                                    {currentProgress?.step === 4 && "🎬 Rendering beautiful frames..."}
+                                    {currentProgress?.step === 5 && "📦 Almost there! Packaging your video..."}
+                                    {(!currentProgress || currentProgress.step <= 1) && "🔮 Preparing the magic..."}
+                                </motion.p>
                             </div>
                         )}
 
@@ -277,8 +417,8 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
                                                 <ChevronDown className="w-3 h-3 group-open:rotate-180 transition-transform" />
                                                 <span>View Manim Code</span>
                                             </summary>
-                                            <div className="mt-2 p-3 rounded-lg bg-black/50 border border-border/50 overflow-x-auto text-[10px]">
-                                                <pre className="text-zinc-400 font-mono">
+                                            <div className="mt-2 p-4 rounded-lg bg-zinc-900 dark:bg-zinc-950 border border-zinc-700 dark:border-zinc-800 overflow-x-auto">
+                                                <pre className="text-emerald-400 dark:text-emerald-300 font-mono text-xs leading-relaxed whitespace-pre-wrap">
                                                     {code}
                                                 </pre>
                                             </div>
