@@ -9,6 +9,7 @@ import asyncio
 import uvicorn
 from .llm_service import generate_manim_code
 from .manim_service import execute_manim_code
+from .s3_service import generate_cloudfront_signed_url
 
 app = FastAPI(title="Prompt to Animate API")
 
@@ -45,13 +46,20 @@ async def generate_animation(request: AnimationRequest):
         code = await generate_manim_code(request.prompt, request.length)
         print("Code generated.")
         
-        # 2. Execute Manim
+        # 2. Execute Manim and upload to S3
         print("Executing Manim...")
         from fastapi.concurrency import run_in_threadpool
-        video_filename = await run_in_threadpool(execute_manim_code, code)
-        print(f"Video generated: {video_filename}")
+        s3_key, local_filename = await run_in_threadpool(execute_manim_code, code)
+        print(f"Video generated: s3_key={s3_key}, local={local_filename}")
         
-        video_url = f"http://localhost:8000/videos/{video_filename}"
+        # 3. Generate signed URL
+        if s3_key:
+            video_url = generate_cloudfront_signed_url(s3_key)
+            print(f"Generated CloudFront signed URL")
+        else:
+            # Fallback to local URL if S3 upload failed
+            video_url = f"http://localhost:8000/videos/{local_filename}"
+            print(f"Using local fallback URL: {video_url}")
         
         return AnimationResponse(video_url=video_url, code=code)
         
@@ -83,14 +91,19 @@ async def generate_animation_stream(request: AnimationRequest):
             yield f"data: {json.dumps({'step': 4, 'status': 'rendering', 'message': 'Rendering animation frames...'})}\n\n"
             
             from fastapi.concurrency import run_in_threadpool
-            video_filename = await run_in_threadpool(execute_manim_code, code)
+            s3_key, local_filename = await run_in_threadpool(execute_manim_code, code)
             
-            # Step 5: Finalizing
-            yield f"data: {json.dumps({'step': 5, 'status': 'finalizing', 'message': 'Finalizing video...'})}\n\n"
+            # Step 5: Uploading / Finalizing
+            yield f"data: {json.dumps({'step': 5, 'status': 'finalizing', 'message': 'Uploading to cloud storage...'})}\n\n"
             await asyncio.sleep(0.3)
             
-            # Step 6: Complete
-            video_url = f"http://localhost:8000/videos/{video_filename}"
+            # Step 6: Complete - generate signed URL
+            if s3_key:
+                video_url = generate_cloudfront_signed_url(s3_key)
+            else:
+                # Fallback to local URL if S3 upload failed
+                video_url = f"http://localhost:8000/videos/{local_filename}"
+            
             yield f"data: {json.dumps({'step': 6, 'status': 'complete', 'message': 'Video ready!', 'video_url': video_url, 'code': code})}\n\n"
             
         except Exception as e:

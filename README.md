@@ -32,6 +32,8 @@ Manimancer is a full-stack web application that generates high-quality education
 | ⏱️ **Configurable Duration** | Choose from Short (5s), Medium (15s), Long (1m), or Deep Dive (2m+) |
 | 📜 **Code Transparency** | Inspect the generated Manim Python code powering your animation |
 | 💾 **One-Click Download** | Save your creations directly to your device |
+| ☁️ **Cloud Storage (S3)** | Videos stored securely in AWS S3 with CloudFront CDN delivery |
+| 🔐 **Signed URLs** | Time-limited, private access to videos via CloudFront signed URLs |
 | 🔐 **User Authentication** | Secure sign-in/sign-up with Clerk (modal-based, no redirect) |
 | 🌗 **Dark Mode** | Beautiful glassmorphic UI with full dark mode support |
 | 📱 **Responsive Design** | Works seamlessly on desktop and mobile devices |
@@ -86,7 +88,12 @@ flowchart TB
         ClerkAPI["Clerk API<br/>(Authentication)"]
     end
     
-    subgraph Storage["💾 Local Storage"]
+    subgraph Storage["☁️ Cloud Storage (AWS)"]
+        S3["S3 Bucket<br/>(Private)"]
+        CloudFront["CloudFront CDN<br/>(Signed URLs)"]
+    end
+    
+    subgraph LocalStorage["💾 Local Storage (Temp)"]
         Videos["generated_animations/"]
         Temp["backend/temp/"]
     end
@@ -99,7 +106,9 @@ flowchart TB
     LLM --> Manim
     Manim -->|"Execute manim CLI"| Temp
     Manim -->|"Output video"| Videos
-    Videos -->|"SSE: video_url"| UI
+    Videos -->|"Upload"| S3
+    S3 --> CloudFront
+    CloudFront -->|"SSE: signed_url"| UI
 ```
 
 ### Request Flow Sequence
@@ -163,6 +172,8 @@ sequenceDiagram
 | [Uvicorn](https://www.uvicorn.org/) | Latest | ASGI server |
 | [LangChain Groq](https://python.langchain.com/) | Latest | LLM integration |
 | [Manim CE](https://www.manim.community/) | Latest | Mathematical animation engine |
+| [Boto3](https://boto3.amazonaws.com/v1/documentation/api/latest/index.html) | Latest | AWS SDK for Python (S3 uploads) |
+| [Cryptography](https://cryptography.io/) | Latest | RSA signing for CloudFront URLs |
 | [python-dotenv](https://github.com/theskumar/python-dotenv) | Latest | Environment variable management |
 
 ### AI/LLM
@@ -189,10 +200,14 @@ prompt_to_animate/
 │   ├── __init__.py                   # Package marker
 │   ├── main.py                       # FastAPI app, routes (/generate, /generate-stream)
 │   ├── llm_service.py                # Prompt engineering, Groq LLM integration
-│   ├── manim_service.py              # Manim CLI execution, video processing
+│   ├── manim_service.py              # Manim CLI execution, S3 upload integration
+│   ├── s3_service.py                 # ⚠️ AWS S3 upload + CloudFront signed URL generation
 │   ├── temp/                         # 🔄 Temporary Python scripts (auto-cleaned)
 │   │   └── .gitkeep
 │   └── venv/                         # 🔄 Python virtual environment
+│
+├── private_key.pem                   # ⚠️🔒 CloudFront RSA private key (DO NOT COMMIT)
+├── public_key.pem                    # 🔄 CloudFront public key (uploaded to AWS)
 │
 ├── frontend/                         # ⚛️ Next.js 16 Frontend
 │   ├── .env.local                    # ⚠️ Frontend: Clerk API keys
@@ -277,7 +292,7 @@ python -m venv venv
 source venv/bin/activate
 
 # Install Python dependencies
-pip install fastapi uvicorn langchain-groq python-dotenv manim
+pip install fastapi uvicorn langchain-groq python-dotenv manim boto3 cryptography
 
 # Return to project root
 cd ..
@@ -288,12 +303,77 @@ cd ..
 Create a `.env` file in the **project root**:
 
 ```env
+# Groq LLM API Key
 GROQ_API_KEY=your_groq_api_key_here
+
+# AWS S3 Configuration
+AWS_ACCESS_KEY_ID=your_access_key_id
+AWS_SECRET_ACCESS_KEY=your_secret_access_key
+AWS_REGION=ap-south-1
+S3_BUCKET_NAME=your_bucket_name
+
+# CloudFront Configuration
+CLOUDFRONT_DOMAIN=your_distribution.cloudfront.net
+CLOUDFRONT_KEY_PAIR_ID=your_key_pair_id
+CLOUDFRONT_PRIVATE_KEY_PATH=./private_key.pem
 ```
 
 > 🔑 **Get your FREE Groq API key:** [console.groq.com](https://console.groq.com/) → Sign up → Create API Key
 
-#### 4️⃣ Set Up the Frontend
+> ☁️ **AWS credentials are optional for local development.** If not configured, videos will be served locally from `/videos/`.
+
+#### 4️⃣ Set Up AWS S3 + CloudFront (Optional but Recommended)
+
+For production deployments with secure, scalable video delivery:
+
+**Step 1: Create S3 Bucket**
+1. Go to [AWS S3 Console](https://s3.console.aws.amazon.com/s3/)
+2. Click **Create bucket**
+3. Name it (e.g., `manimancer-videos`)
+4. **Block all public access**: Keep enabled (we'll use CloudFront)
+5. Create the bucket
+
+**Step 2: Create IAM User**
+1. Go to **IAM** → **Users** → **Create user**
+2. Name it (e.g., `manimancer-s3-user`)
+3. Attach policies: `AmazonS3FullAccess`, `CloudFrontFullAccess`
+4. Go to **Security credentials** → **Create access key**
+5. Copy `Access Key ID` and `Secret Access Key` to your `.env`
+
+**Step 3: Create CloudFront Distribution**
+1. Go to [CloudFront Console](https://console.aws.amazon.com/cloudfront/)
+2. Click **Create distribution**
+3. **Origin domain**: Select your S3 bucket
+4. **Origin access**: Select **Origin access control settings (recommended)**
+5. Create a new OAC and update the S3 bucket policy when prompted
+6. **Restrict viewer access**: **Yes**
+7. Create a **key group** (see Step 4)
+8. Create the distribution and copy the **Domain name** to your `.env`
+
+**Step 4: Generate RSA Key Pair for Signed URLs**
+
+```bash
+# Generate private key (keep this secret!)
+openssl genrsa -out private_key.pem 2048
+
+# Generate public key (upload to CloudFront)
+openssl rsa -pubout -in private_key.pem -out public_key.pem
+```
+
+**Step 5: Upload Public Key to CloudFront**
+1. Go to **CloudFront** → **Key management** → **Public keys**
+2. Click **Create public key**
+3. Paste contents of `public_key.pem`
+4. Copy the **Key ID** to your `.env` as `CLOUDFRONT_KEY_PAIR_ID`
+
+**Step 6: Create Key Group**
+1. Go to **CloudFront** → **Key management** → **Key groups**
+2. Create a key group with your public key
+3. Attach the key group to your distribution's behavior
+
+> 🔒 **Security Note:** The `private_key.pem` is in `.gitignore` and should **NEVER** be committed to version control.
+
+#### 5️⃣ Set Up the Frontend
 
 ```bash
 cd frontend
@@ -301,7 +381,7 @@ npm install
 cd ..
 ```
 
-#### 5️⃣ Configure Clerk Authentication
+#### 6️⃣ Configure Clerk Authentication
 
 1. Create a free account at [clerk.com](https://clerk.com)
 2. Create a new application in the Clerk Dashboard
@@ -320,7 +400,7 @@ NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/
 
 > ⚠️ **Important:** Do NOT set `NEXT_PUBLIC_CLERK_SIGN_IN_URL` or `NEXT_PUBLIC_CLERK_SIGN_UP_URL` — the app uses modal mode.
 
-#### 6️⃣ Run the Application
+#### 7️⃣ Run the Application
 
 Open **two terminal windows**:
 
@@ -536,6 +616,11 @@ The `UserButton` in `Sidebar.tsx` can be customized:
 | Frontend can't connect | Ensure backend is running on port 8000 |
 | Clerk "Invalid publishable key" | Check `frontend/.env.local` has correct keys |
 | 404 after sign-up | Remove `NEXT_PUBLIC_CLERK_SIGN_IN_URL` and `NEXT_PUBLIC_CLERK_SIGN_UP_URL` from `.env.local` |
+| S3 upload fails | Verify `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `S3_BUCKET_NAME` in `.env` |
+| CloudFront 403 Forbidden | Ensure key group is attached to distribution behavior with \"Restrict viewer access: Yes\" |
+| Signed URL not working | Verify `CLOUDFRONT_KEY_PAIR_ID` matches the public key ID in CloudFront |
+| \"Missing Key\" error | Ensure `private_key.pem` exists at path specified in `CLOUDFRONT_PRIVATE_KEY_PATH` |
+| Video plays locally but not CloudFront | Check S3 bucket policy allows CloudFront access (OAC) |
 
 ### Debug Commands
 

@@ -4,11 +4,20 @@ import sys
 import uuid
 import shutil
 from pathlib import Path
+from .s3_service import upload_video_to_s3
 
-def execute_manim_code(code: str) -> str:
+def execute_manim_code(code: str, upload_to_s3: bool = True) -> tuple[str, str]:
     """
-    Executes the given Manim code and returns the filename of the generated video.
+    Executes the given Manim code and returns the S3 key and local path of the generated video.
     Uses GPU-accelerated OpenGL rendering for maximum speed without quality loss.
+    
+    Args:
+        code: The Manim Python code to execute
+        upload_to_s3: Whether to upload the video to S3 (default: True)
+    
+    Returns:
+        Tuple of (s3_key, local_path) if upload_to_s3 is True
+        Tuple of (None, local_path) if upload_to_s3 is False
     """
     # Create temp file
     file_id = str(uuid.uuid4())
@@ -107,7 +116,7 @@ def execute_manim_code(code: str) -> str:
     
     shutil.move(str(expected_path), str(final_path))
     
-    # Cleanup temp files and intermediate folders
+    # Cleanup temp python file and intermediate folders
     try:
         os.remove(filepath)
         # Also cleanup the scene folder to save disk space
@@ -117,4 +126,24 @@ def execute_manim_code(code: str) -> str:
     except OSError:
         pass
     
-    return final_filename
+    # Upload to S3 if enabled
+    s3_key = None
+    if upload_to_s3:
+        try:
+            s3_key = upload_video_to_s3(str(final_path))
+            print(f"Video uploaded to S3: {s3_key}")
+            
+            # Delete local file after successful upload to save disk space
+            try:
+                os.remove(final_path)
+                print(f"Deleted local file: {final_path}")
+            except OSError as e:
+                print(f"Warning: Could not delete local file: {e}")
+                
+        except Exception as e:
+            print(f"Warning: S3 upload failed, keeping local file: {e}")
+            # Return local filename if S3 upload fails
+            return (None, final_filename)
+    
+    return (s3_key, final_filename)
+
