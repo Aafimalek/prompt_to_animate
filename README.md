@@ -19,6 +19,8 @@ Manimancer is a full-stack web application that generates high-quality education
 - [Configuration](#-configuration)
 - [Example Prompts](#-example-prompts)
 - [Troubleshooting](#-troubleshooting)
+- [Authentication](#-authentication)
+- [Pricing Plans](#-pricing-plans)
 - [License](#-license)
 
 ---
@@ -36,6 +38,7 @@ Manimancer is a full-stack web application that generates high-quality education
 | 🔐 **Signed URLs** | Time-limited, private access to videos via CloudFront signed URLs |
 | 🔐 **User Authentication** | Secure sign-in/sign-up with Clerk (modal-based, no redirect) |
 | 🗄️ **MongoDB Persistence** | Chat history and video references saved per-user in MongoDB Atlas |
+| 💎 **Pricing Plans** | Free, Basic ($3), and Pro ($20/mo) tiers with usage limits |
 | 🌗 **Dark Mode** | Beautiful glassmorphic UI with full dark mode support |
 | 📱 **Responsive Design** | Works seamlessly on desktop and mobile devices |
 | 📚 **History Sidebar** | Browse and replay your previously generated animations (persisted) |
@@ -56,7 +59,7 @@ Manimancer is a full-stack web application that generates high-quality education
 | **Short (5s)** | 5-10 seconds | Quick concepts, single visualizations |
 | **Medium (15s)** | 15-20 seconds | 2-3 step explanations |
 | **Long (1m)** | 55-70 seconds | Detailed tutorials with multiple sections |
-| **Deep Dive (2m+)** | 120+ seconds | Comprehensive lessons with examples |
+| **Deep Dive (2m+)** | 110-130 seconds | Comprehensive lessons with 6 sections and examples |
 
 ---
 
@@ -70,7 +73,8 @@ flowchart TB
         subgraph Frontend["Next.js 16 Frontend (localhost:3000)"]
             Clerk["Clerk Auth<br/>(Sign In/Up Modal)"]
             UI["AnimationGenerator<br/>Component"]
-            Sidebar["History Sidebar"]
+            Sidebar["History Sidebar<br/>+ Upgrade Button"]
+            Pricing["PricingModal<br/>(3 Tiers)"]
             Navbar["Navigation Bar"]
         end
     end
@@ -229,14 +233,16 @@ prompt_to_animate/
 │   │   └── icon.svg                  # SVG icon
 │   ├── components/                   # React Components
 │   │   ├── AnimationGenerator.tsx    # Main generator with SSE progress
-│   │   ├── Sidebar.tsx               # History sidebar + Clerk auth buttons
+│   │   ├── Sidebar.tsx               # History sidebar + Clerk auth + Upgrade button
+│   │   ├── PricingModal.tsx          # Pricing plans modal (Free/Basic/Pro)
 │   │   ├── Navbar.tsx                # Top navigation bar
 │   │   ├── Footer.tsx                # Page footer
 │   │   ├── Logo.tsx                  # Manimancer logo (Nabla font)
 │   │   ├── ThemeProvider.tsx         # Dark mode provider
 │   │   └── icons/                    # Custom SVG icons
 │   ├── lib/                          # Utilities
-│   │   └── utils.ts                  # cn() helper (clsx + tailwind-merge)
+│   │   ├── utils.ts                  # cn() helper (clsx + tailwind-merge)
+│   │   └── api.ts                    # API functions for chat operations
 │   ├── public/                       # Static assets
 │   ├── package.json                  # Node.js dependencies
 │   ├── tsconfig.json                 # TypeScript configuration
@@ -477,7 +483,7 @@ The `/generate-stream` endpoint sends **6 progress updates** via Server-Sent Eve
 | **Short (5s)** | 5-10 seconds | Single visual impact, minimal text |
 | **Medium (15s)** | 15-20 seconds | 2-3 clear steps, moderate pacing |
 | **Long (1m)** | 55-70 seconds | 4-5 sections, detailed step-by-step |
-| **Deep Dive (2m+)** | 120+ seconds | 6-8 phases, full tutorial with examples |
+| **Deep Dive (2m+)** | 110-130 seconds (min 110s) | 6 full sections with examples, 30+ wait calls |
 
 ---
 
@@ -713,7 +719,61 @@ Manimancer uses [Clerk](https://clerk.com) for authentication with a **modal-bas
 1. **Signed Out:** Sidebar footer shows "Sign In" (orange) and "Sign Up" buttons
 2. **Click Sign In/Up:** Clerk modal appears (no page redirect)
 3. **After Auth:** Modal closes, user redirected to `/`
-4. **Signed In:** Sidebar footer shows user avatar (Clerk `UserButton`)
+4. **Signed In:** Sidebar footer shows Upgrade button + user avatar
+
+---
+
+## 💎 Pricing Plans
+
+Manimancer offers three pricing tiers to suit different needs.
+
+### Tier Comparison
+
+| Feature | Free ($0) | Basic ($3) | Pro ($20/mo) |
+|:--------|:----------|:-----------|:-------------|
+| **Videos per month** | 5 | 5-7 per purchase | Unlimited |
+| **Max Resolution** | 720p | 4K | 4K |
+| **Frame Rate** | 30 FPS | 60 FPS | 60 FPS |
+| **Max Length** | 30 seconds | 5 minutes | Unlimited |
+| **Priority Rendering** | ❌ | ✅ | ✅ |
+| **Premium Support** | ❌ | ❌ | ✅ |
+
+### Plan Details
+
+#### Free Tier
+- 5 videos per month
+- 720p resolution at 30 FPS
+- Maximum 30 seconds per video
+- Basic support
+
+#### Basic Tier ($3 one-time)
+- 5 videos at 1080p 60fps (max 5 mins each)
+- OR 2 videos at 4K 60fps (max 5 mins each)
+- Priority rendering queue
+- Email support
+
+#### Pro Tier ($20/month)
+- Unlimited video generations
+- Up to 4K resolution at 60 FPS
+- No length restrictions
+- Priority processing
+- Premium support
+- Early access to new features
+
+### Upgrade Button
+
+The **Upgrade** button (Crown icon) appears in the sidebar when signed in:
+
+```
+┌─────────────────────┐
+│  [Crown] Upgrade    │  ← Orange gradient button
+├─────────────────────┤
+│  [Avatar] Account   │
+│  Manage profile     │
+└─────────────────────┘
+```
+
+Clicking it opens the `PricingModal` component with all three tier options.
 
 ---
 
