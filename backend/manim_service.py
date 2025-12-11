@@ -36,25 +36,17 @@ def execute_manim_code(code: str, upload_to_s3: bool = True) -> tuple[str, str]:
     output_root = Path("generated_animations").resolve()
     output_root.mkdir(parents=True, exist_ok=True)
     
-    # GPU-Accelerated Manim command for FAST 1080p60 rendering
-    # Using OpenGL renderer for GPU acceleration - significantly faster
+    # Cairo renderer for cloud-compatible CPU-based rendering (1080p @ 60fps)
     cmd = [
         sys.executable, "-m", "manim",
         "-qh",  # Quality High (1080p @ 60fps)
-        "--renderer=opengl",  # GPU-accelerated rendering (MUCH faster)
-        "--write_to_movie",  # Write directly to movie file
         "--disable_caching",  # Skip caching overhead
         "--media_dir", str(output_root),
         str(filepath),
         "GenScene"
     ]
     
-    # Environment with optimizations
-    env = os.environ.copy()
-    # Force hardware acceleration where available
-    env["PYOPENGL_PLATFORM"] = ""  # Let it auto-detect the best platform
-    
-    print(f"Executing Manim (OpenGL GPU-accelerated): {' '.join(cmd)}")
+    print(f"Executing Manim (Cairo renderer): {' '.join(cmd)}")
     
     # Run process
     try:
@@ -62,37 +54,15 @@ def execute_manim_code(code: str, upload_to_s3: bool = True) -> tuple[str, str]:
             cmd, 
             capture_output=True, 
             text=True, 
-            check=False,
-            env=env
+            check=False
         )
     except FileNotFoundError:
         raise Exception("Manim command not found. Please ensure manim is installed and in your PATH.")
 
-    # If OpenGL fails, fallback to Cairo renderer
+    # Check for rendering errors
     if result.returncode != 0:
-        print("OpenGL rendering failed, falling back to Cairo renderer...")
-        cmd_fallback = [
-            sys.executable, "-m", "manim",
-            "-qh",  # Quality High (1080p @ 60fps)
-            "--disable_caching",
-            "--media_dir", str(output_root),
-            str(filepath),
-            "GenScene"
-        ]
-        
-        try:
-            result = subprocess.run(
-                cmd_fallback, 
-                capture_output=True, 
-                text=True, 
-                check=False
-            )
-        except FileNotFoundError:
-            raise Exception("Manim command not found.")
-        
-        if result.returncode != 0:
-            error_msg = result.stderr or result.stdout or "Unknown error"
-            raise Exception(f"Manim execution failed:\n{error_msg}")
+        error_msg = result.stderr or result.stdout or "Unknown error"
+        raise Exception(f"Manim execution failed:\n{error_msg}")
         
     # Locate the output file
     # Structure: output_root/videos/scene_{uuid}/1080p60/GenScene.mp4

@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Wand2, ChevronDown, Download, Loader2, Code, Share2, Check, Sparkles, Cpu, Film, Package } from 'lucide-react';
+import { Wand2, ChevronDown, Download, Loader2, Code, Share2, Check, Sparkles, Cpu, Film, Package, LogIn } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { HistoryItem } from './Sidebar';
-import { useUser } from '@clerk/nextjs';
+import { useUser, SignInButton } from '@clerk/nextjs';
 
 interface AnimationGeneratorProps {
     initialData?: HistoryItem | null;
@@ -86,7 +86,11 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
             });
 
             if (!response.ok) {
-                throw new Error('Failed to start generation');
+                if (response.status === 401) {
+                    throw new Error('Please sign in to generate videos');
+                }
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.detail || 'Failed to start generation');
             }
 
             const reader = response.body?.getReader();
@@ -229,29 +233,44 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
                                 </AnimatePresence>
                             </div>
 
-                            <motion.button
-                                onClick={handleGenerate}
-                                disabled={loading || !prompt}
-                                whileHover={{ scale: 1.05 }}
-                                whileTap={{ scale: 0.95 }}
-                                className={cn(
-                                    "px-5 py-2.5 rounded-xl font-medium transition-all flex items-center space-x-2 border-2",
-                                    loading
-                                        ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-400 border-zinc-200 dark:border-zinc-700 cursor-not-allowed"
-                                        : [
-                                            "bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-zinc-900 dark:border-white shadow-lg",
-                                            // Orange Hover Effect: Invert colors to Orange Border + Text
-                                            "hover:bg-white dark:hover:bg-zinc-900",
-                                            "hover:text-orange-600 dark:hover:text-orange-400",
-                                            "hover:border-orange-500 dark:hover:border-orange-500",
-                                            "hover:shadow-orange-500/20"
-                                        ].join(" ")
-                                )}
-                            /** ... */
-                            >
-                                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-                                <span>{loading ? 'Conjuring...' : 'Generate'}</span>
-                            </motion.button>
+                            {isSignedIn ? (
+                                <motion.button
+                                    onClick={handleGenerate}
+                                    disabled={loading || !prompt}
+                                    whileHover={{ scale: 1.05 }}
+                                    whileTap={{ scale: 0.95 }}
+                                    className={cn(
+                                        "px-5 py-2.5 rounded-xl font-medium transition-all flex items-center space-x-2 border-2",
+                                        loading || !prompt
+                                            ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-400 border-zinc-200 dark:border-zinc-700 cursor-not-allowed"
+                                            : [
+                                                "bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-zinc-900 dark:border-white shadow-lg",
+                                                "hover:bg-white dark:hover:bg-zinc-900",
+                                                "hover:text-orange-600 dark:hover:text-orange-400",
+                                                "hover:border-orange-500 dark:hover:border-orange-500",
+                                                "hover:shadow-orange-500/20"
+                                            ].join(" ")
+                                    )}
+                                >
+                                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                                    <span>{loading ? 'Conjuring...' : 'Generate'}</span>
+                                </motion.button>
+                            ) : (
+                                <SignInButton mode="modal">
+                                    <motion.button
+                                        whileHover={{ scale: 1.05 }}
+                                        whileTap={{ scale: 0.95 }}
+                                        className={cn(
+                                            "px-5 py-2.5 rounded-xl font-medium transition-all flex items-center space-x-2 border-2",
+                                            "bg-orange-500 text-white border-orange-500 shadow-lg shadow-orange-500/20",
+                                            "hover:bg-orange-600 hover:border-orange-600"
+                                        )}
+                                    >
+                                        <LogIn className="w-4 h-4" />
+                                        <span>Sign in to Generate</span>
+                                    </motion.button>
+                                </SignInButton>
+                            )}
                         </div>
                     </div>
                 </div>

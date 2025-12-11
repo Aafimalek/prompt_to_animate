@@ -90,8 +90,16 @@ async def generate_animation(request: AnimationRequest):
 async def generate_animation_stream(request: AnimationRequest):
     """
     Streaming endpoint that sends progress updates as Server-Sent Events.
-    Now saves chat to MongoDB if clerk_id is provided.
+    Requires authentication - clerk_id must be provided.
+    Saves chat to MongoDB for authenticated users.
     """
+    # Authentication check - require clerk_id
+    if not request.clerk_id:
+        raise HTTPException(
+            status_code=401, 
+            detail="Authentication required. Please sign in to generate videos."
+        )
+    
     async def event_generator():
         try:
             # Step 1: Analyzing prompt

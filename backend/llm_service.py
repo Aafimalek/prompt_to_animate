@@ -20,58 +20,103 @@ llm = ChatGroq(
     temperature=0.2  # Slightly higher for creativity, but still focused
 )
 
-# Detailed length guides with concrete timing breakdowns
+# Detailed length guides with STRICT timing limits
 LENGTH_GUIDE = {
     "Short (5s)": """
-TARGET: 5-10 seconds total.
+TARGET: 5-7 seconds. STRICT MAXIMUM: 7 seconds.
+⚠️ ANY VIDEO OVER 7 SECONDS IS UNACCEPTABLE.
+
+TIME BUDGET (you MUST follow this):
+- Title entrance: 1.5s (run_time=1, wait(0.5))
+- Main visual: 3-4s (run_time=1-2, wait(1-2))
+- Total wait() calls: MAX 2-3, each ≤1 second
+
 STRUCTURE:
-- 1 title card (2s with self.wait(2))
-- 1 main visual showing the core concept (3-5s)
-- Simple, impactful, minimal text
-TIMING: Use self.wait(1) to self.wait(2) sparingly. Keep it punchy.
+- 1 title card (1.5s total)
+- 1 main visual with the SINGLE core concept (3-4s)
+- THAT'S IT. No more. Keep it punchy.
+
+RULES:
+- Maximum 2 text elements on screen
+- DO NOT add explanations - just show the visual
+- Use self.wait(0.5) or self.wait(1) ONLY
 """,
     
     "Medium (15s)": """
-TARGET: 15-25 seconds total.
+TARGET: 15-17 seconds. STRICT MAXIMUM: 18 seconds.
+⚠️ ANY VIDEO OVER 18 SECONDS IS UNACCEPTABLE.
+
+TIME BUDGET:
+- Title: 2s (run_time=1, wait(1))
+- Section 1: 4-5s
+- Section 2: 4-5s
+- Section 3: 4-5s
+- Total: 14-17 seconds MAX
+
 STRUCTURE:
-- Title/intro (3s)
-- 2-3 main content sections (4-5s each)
-- Brief conclusion/summary (2-3s)
-TIMING: Use self.wait(2) after each major element. Total ~6-8 wait calls.
+- Title/intro (2s)
+- 2-3 content sections (4-5s each)
+- Clear transitions with FadeOut between sections
+
+RULES:
+- Maximum 4 total wait() calls
+- Each wait() is 1-2 seconds max
+- Count your seconds: animations default to ~1s each
 """,
     
     "Long (1m)": """
-TARGET: 55-70 seconds total (approximately 1 minute).
+TARGET: 55-65 seconds. STRICT MAXIMUM: 70 seconds.
+⚠️ ANY VIDEO OVER 70 SECONDS IS UNACCEPTABLE.
+
+TIME BUDGET (calculate before coding):
+- Title: 4s
+- Section 1: 12-15s
+- Section 2: 15-18s
+- Section 3: 15-18s
+- Conclusion: 5-8s
+- TOTAL: 55-65 seconds
+
 STRUCTURE:
-- Title with topic introduction (5s)
-- Section 1: Define/Explain the concept (10-15s)
-- Section 2: Show how it works with visuals (15-20s)
-- Section 3: Example or application (15-20s)
-- Conclusion/Key takeaway (5-10s)
-TIMING: Use self.wait(2) to self.wait(3) after EVERY text block and visual transition.
-Minimum 15 self.wait() calls throughout. Clear each section with FadeOut before next.
+- Title with brief intro (4s)
+- 3 main content sections (12-18s each)
+- Brief conclusion/summary (5-8s)
+
+RULES:
+- Maximum 12 wait() calls total
+- Average wait() = 2 seconds
+- Clear each section with FadeOut before next
+- Count your time budget in comments
 """,
     
     "Deep Dive (2m)": """
-TARGET: 120-150 seconds total (2+ minutes). THIS MUST BE A LONG VIDEO.
-STRUCTURE (6-8 distinct phases):
-1. Title & Hook (5-10s): Attention-grabbing intro
-2. What is it? (15-20s): Clear definition with visuals
-3. Why does it matter? (15-20s): Real-world relevance
-4. How does it work? (25-30s): Step-by-step breakdown with animations
-5. Example 1 (20-25s): Concrete worked example
-6. Example 2 or Edge Case (15-20s): Additional example or special cases
-7. Common Mistakes/Tips (10-15s): What to watch out for
-8. Summary & Recap (10-15s): Key points review
+TARGET: 120-130 seconds. STRICT MAXIMUM: 135 seconds.
+⚠️ ANY VIDEO OVER 135 SECONDS (2:15) IS UNACCEPTABLE.
 
-TIMING RULES (CRITICAL):
-- self.wait(3) after EVERY text block
-- self.wait(2) between animation steps
-- self.wait(4) after complex diagrams to let viewers absorb
-- Minimum 25-30 self.wait() calls total
-- If content seems short, ADD MORE EXAMPLES or show the concept from different angles
+TIME BUDGET (MANDATORY - write this in comments):
+- Title & Hook: 8s
+- Definition: 18s
+- How it works: 25s
+- Example 1: 25s
+- Example 2: 20s
+- Tips/Summary: 20s
+- TOTAL: ~120 seconds
+
+STRUCTURE (6 sections):
+1. Title & Hook (5-8s)
+2. What is it? Definition (15-20s)
+3. How does it work? (20-25s)
+4. Example 1 with walkthrough (20-25s)
+5. Example 2 or application (15-20s)
+6. Summary & key points (15-20s)
+
+RULES:
+- Maximum 25 wait() calls
+- Average wait() = 2-3 seconds
+- MUST include time budget comment at top of construct()
+- If running long, CUT content, don't speed up
 """
 }
+
 
 template = """
 You are an EXPERT Manim (Community Edition) Animation Developer and an EXPERT Educator.
@@ -111,12 +156,33 @@ DURATION REQUIREMENT:
 - Math: `MathTex(r"E = mc^2", font_size=44, color=YELLOW)`
 - NEVER use font_size > 60 for body text (it looks amateur)
 
-**Layout Principles**:
+**Layout Principles & OVERLAP PREVENTION (CRITICAL)**:
 - Center important content: `.move_to(ORIGIN)` or `.to_edge(UP)`
 - Group related items: `VGroup(a, b, c).arrange(DOWN, buff=0.5)`
 - Use consistent spacing: `buff=0.5` for tight, `buff=1` for loose
-- Keep content within visible bounds (stay within 6 units from center)
-- Section headers at TOP, content in CENTER, supporting info at BOTTOM
+- Keep content within visible bounds (stay within 5.5 units from center)
+
+⚠️ OVERLAP PREVENTION RULES (MUST FOLLOW):
+- ALWAYS clear screen between MAJOR sections: `self.play(FadeOut(*self.mobjects))`
+- TEXT LIMIT: Maximum 2-3 text labels visible at once (prevents reading confusion)
+- VISUAL ELEMENTS: Can show more shapes/diagrams if arranged properly using:
+  * `VGroup(...).arrange(RIGHT, buff=0.3)` for horizontal layouts
+  * `VGroup(...).arrange(DOWN, buff=0.3)` for vertical layouts
+  * Grid layouts for complex diagrams like CNN layers
+- For COMPLEX DIAGRAMS (CNN, neural networks, flowcharts):
+  * Build progressively: show one component, explain, then add next
+  * Use `.scale(0.5)` to `.scale(0.7)` for fitting multiple components
+  * Group related elements: `layer1 = VGroup(nodes, connections)`
+  * Use `.shift()` to position groups in different screen areas
+- Reserve screen ZONES (don't put text in diagram area):
+  * TOP ZONE (y > 2.5): Titles only
+  * CENTER ZONE (-2.5 < y < 2.5): Main diagrams
+  * BOTTOM ZONE (y < -2.5): Explanatory text, formulas
+- Position EVERY element explicitly with:
+  * `.to_edge(UP/DOWN/LEFT/RIGHT)`
+  * `.next_to(other_element, direction, buff=0.5)`
+- For long text: `Text(...).scale_to_fit_width(12)` to prevent overflow
+- When adding new elements, decide: keep existing OR fade them out
 
 **Animation Quality**:
 - Entrance: `Write()` for text, `Create()` for shapes, `GrowFromCenter()` for emphasis
@@ -124,7 +190,7 @@ DURATION REQUIREMENT:
 - Highlights: `Indicate()`, `Circumscribe()`, `Flash()` for emphasis
 - Movement: `shift()`, `move_to()` with smooth animations
 - ALWAYS chain related animations: `self.play(Create(a), Create(b))`
-- NEVER show more than 5-6 elements on screen at once (declutter!)
+- For complex diagrams: Build incrementally, showing one part at a time
 
 **Scene Structure**:
 ```
@@ -139,12 +205,27 @@ self.play(Write(title))
 self.wait(1)
 ```
 
-### TIMING CONTROL (VERY IMPORTANT):
-- `self.wait(1)` = 1 second pause
-- `self.wait(2)` = 2 seconds (good for reading short text)
-- `self.wait(3)` = 3 seconds (good for complex visuals)
-- Animation duration: `self.play(..., run_time=2)` for slower, clearer animations
-- For longer videos: MORE self.wait() calls, not faster animations
+### TIMING CONTROL (CRITICAL - YOUR VIDEO WILL BE REJECTED IF TOO LONG):
+
+⏱️ TIME BUDGET CALCULATION (MANDATORY):
+Before writing code, mentally calculate your total runtime:
+- Count each self.play() as ~1 second (unless run_time specified)
+- Add all self.wait(X) durations
+- SUM MUST BE WITHIN ±2 SECONDS OF TARGET
+
+Reference:
+- `self.wait(0.5)` = half second
+- `self.wait(1)` = 1 second 
+- `self.wait(2)` = 2 seconds
+- `self.play(..., run_time=1.5)` = 1.5 seconds
+
+⚠️ DURATION LIMITS:
+- Short (5s): MAX 3 wait() calls, MAX 7 seconds total
+- Medium (15s): MAX 6 wait() calls, MAX 18 seconds total  
+- Long (1m): MAX 12 wait() calls, MAX 70 seconds total
+- Deep Dive (2m): MAX 25 wait() calls, MAX 135 seconds total
+
+RULE: If your animation seems long, REMOVE CONTENT. Do not try to speed up.
 
 ### CODE REQUIREMENTS:
 1. Start with: `from manim import *`
