@@ -100,12 +100,17 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
                 throw new Error('No response body');
             }
 
+            let buffer = '';
+            let completed = false;
+
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
 
-                const chunk = decoder.decode(value);
-                const lines = chunk.split('\n');
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                // Keep the last partial line in the buffer
+                buffer = lines.pop() || '';
 
                 for (const line of lines) {
                     if (line.startsWith('data: ')) {
@@ -116,7 +121,7 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
                             if (data.status === 'complete' && data.video_url && data.code) {
                                 setVideoUrl(data.video_url);
                                 setCode(data.code);
-                                setLoading(false);
+                                completed = true;
 
                                 // Notify parent to save/update history
                                 onGenerateComplete({
@@ -134,6 +139,34 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
                         }
                     }
                 }
+            }
+
+            // Process any remaining data in the buffer
+            if (buffer.startsWith('data: ')) {
+                try {
+                    const data: ProgressStep = JSON.parse(buffer.slice(6));
+                    if (data.status === 'complete' && data.video_url && data.code && !completed) {
+                        setVideoUrl(data.video_url);
+                        setCode(data.code);
+                        completed = true;
+                        onGenerateComplete({
+                            id: data.chat_id || crypto.randomUUID(),
+                            prompt: prompt,
+                            timestamp: Date.now(),
+                            videoUrl: data.video_url,
+                            code: data.code
+                        });
+                    }
+                } catch {
+                    // Ignore
+                }
+            }
+
+            // Always set loading to false when stream ends
+            setLoading(false);
+
+            if (!completed) {
+                setError('Generation ended unexpectedly. Please try again.');
             }
         } catch (err: any) {
             setError(err.message || 'Something went wrong');

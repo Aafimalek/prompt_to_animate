@@ -5,6 +5,7 @@ import { Sidebar, HistoryItem } from '@/components/Sidebar';
 import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
 import { AnimationGenerator } from '@/components/AnimationGenerator';
+import { PricingModal } from '@/components/PricingModal';
 import { Menu } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUser } from '@clerk/nextjs';
@@ -17,6 +18,7 @@ export default function Home() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDesktopCollapsed, setIsDesktopCollapsed] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [isPricingOpen, setIsPricingOpen] = useState(false);
 
   // Convert Chat from API to HistoryItem
   const chatToHistoryItem = (chat: Chat): HistoryItem => ({
@@ -136,6 +138,7 @@ export default function Home() {
         isDesktopCollapsed={isDesktopCollapsed}
         onDesktopToggle={() => setIsDesktopCollapsed(!isDesktopCollapsed)}
         isLoading={isLoadingHistory}
+        onUpgradeClick={() => setIsPricingOpen(true)}
       />
 
       {/* Main Content */}
@@ -154,6 +157,9 @@ export default function Home() {
       </main>
 
       <Footer isDesktopCollapsed={isDesktopCollapsed} />
+
+      {/* Pricing Modal */}
+      <PricingModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
     </div>
   );
 }

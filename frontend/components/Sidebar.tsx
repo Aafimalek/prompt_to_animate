@@ -1,4 +1,4 @@
-import { Plus, MessageSquare, Trash2, X, PanelLeftClose, PanelLeftOpen, LogIn, UserPlus, Loader2 } from 'lucide-react';
+import { Plus, MessageSquare, Trash2, X, PanelLeftClose, PanelLeftOpen, LogIn, UserPlus, Loader2, Crown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { useEffect, useState } from 'react';
@@ -22,6 +22,7 @@ interface SidebarProps {
     isDesktopCollapsed: boolean;
     onDesktopToggle: () => void;
     isLoading?: boolean; // Loading state for history
+    onUpgradeClick?: () => void; // Open pricing modal
 }
 
 export function Sidebar({
@@ -33,7 +34,8 @@ export function Sidebar({
     onClose,
     isDesktopCollapsed,
     onDesktopToggle,
-    isLoading = false
+    isLoading = false,
+    onUpgradeClick
 }: SidebarProps) {
     return (
         <>
@@ -236,26 +238,48 @@ export function Sidebar({
                     {/* Signed In State */}
                     <SignedIn>
                         <div className={cn(
-                            "flex items-center rounded-lg",
-                            isDesktopCollapsed ? "justify-center p-2" : "space-x-3 px-2 py-2"
+                            "flex flex-col gap-3",
+                            isDesktopCollapsed ? "items-center" : ""
                         )}>
-                            <UserButton
-                                appearance={{
-                                    elements: {
-                                        avatarBox: "w-8 h-8",
-                                        userButtonPopoverCard: "bg-zinc-900 border border-zinc-800",
-                                        userButtonPopoverActionButton: "hover:bg-zinc-800",
-                                        userButtonPopoverActionButtonText: "text-zinc-100",
-                                        userButtonPopoverFooter: "hidden"
-                                    }
-                                }}
-                            />
-                            {!isDesktopCollapsed && (
-                                <div className="flex-1 overflow-hidden">
-                                    <p className="text-sm font-medium text-foreground truncate">Account</p>
-                                    <p className="text-xs text-muted-foreground truncate">Manage profile</p>
-                                </div>
-                            )}
+                            {/* Upgrade Button */}
+                            <button
+                                onClick={onUpgradeClick}
+                                className={cn(
+                                    "flex items-center justify-center gap-2 rounded-xl font-medium transition-all duration-200 active:scale-95",
+                                    "bg-gradient-to-r from-orange-500 to-orange-600 text-white",
+                                    "hover:from-orange-600 hover:to-orange-700",
+                                    "shadow-md shadow-orange-500/20",
+                                    isDesktopCollapsed ? "p-3" : "py-2.5 px-4 w-full"
+                                )}
+                                title="Upgrade Plan"
+                            >
+                                <Crown className="w-4 h-4" />
+                                {!isDesktopCollapsed && <span>Upgrade</span>}
+                            </button>
+
+                            {/* User Account */}
+                            <div className={cn(
+                                "flex items-center rounded-lg",
+                                isDesktopCollapsed ? "justify-center p-2" : "space-x-3 px-2 py-2"
+                            )}>
+                                <UserButton
+                                    appearance={{
+                                        elements: {
+                                            avatarBox: "w-8 h-8",
+                                            userButtonPopoverCard: "bg-zinc-900 border border-zinc-800",
+                                            userButtonPopoverActionButton: "hover:bg-zinc-800",
+                                            userButtonPopoverActionButtonText: "text-zinc-100",
+                                            userButtonPopoverFooter: "hidden"
+                                        }
+                                    }}
+                                />
+                                {!isDesktopCollapsed && (
+                                    <div className="flex-1 overflow-hidden">
+                                        <p className="text-sm font-medium text-foreground truncate">Account</p>
+                                        <p className="text-xs text-muted-foreground truncate">Manage profile</p>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </SignedIn>
                 </div>

@@ -28,14 +28,16 @@ export async function getUserChats(clerkId: string): Promise<Chat[]> {
         const response = await fetch(`${API_BASE_URL}/chats/${clerkId}`);
 
         if (!response.ok) {
-            throw new Error(`Failed to fetch chats: ${response.statusText}`);
+            console.error(`Failed to fetch chats: ${response.statusText}`);
+            return []; // Return empty array instead of throwing
         }
 
         const data: ChatListResponse = await response.json();
         return data.chats;
     } catch (error) {
-        console.error('Error fetching user chats:', error);
-        throw error;
+        // Handle network errors gracefully (e.g., backend not running)
+        console.error('Error fetching user chats (backend may be unavailable):', error);
+        return []; // Return empty array so the app continues to work
     }
 }
 

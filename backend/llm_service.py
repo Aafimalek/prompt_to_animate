@@ -89,31 +89,44 @@ RULES:
 """,
     
     "Deep Dive (2m)": """
-TARGET: 120-130 seconds. STRICT MAXIMUM: 135 seconds.
-⚠️ ANY VIDEO OVER 135 SECONDS (2:15) IS UNACCEPTABLE.
+⚠️ CRITICAL MINIMUM: 110 SECONDS. ANY VIDEO UNDER 110 SECONDS WILL BE REJECTED.
+TARGET: 115-125 seconds. This is a COMPREHENSIVE educational video.
 
-TIME BUDGET (MANDATORY - write this in comments):
-- Title & Hook: 8s
-- Definition: 18s
-- How it works: 25s
-- Example 1: 25s
-- Example 2: 20s
-- Tips/Summary: 20s
-- TOTAL: ~120 seconds
+YOU MUST REACH AT LEAST 110 SECONDS. Count your time carefully!
 
-STRUCTURE (6 sections):
-1. Title & Hook (5-8s)
-2. What is it? Definition (15-20s)
-3. How does it work? (20-25s)
-4. Example 1 with walkthrough (20-25s)
-5. Example 2 or application (15-20s)
-6. Summary & key points (15-20s)
+TIME BUDGET (MANDATORY - WRITE THIS COMMENT IN YOUR CODE):
+```
+# TIME BUDGET PLAN:
+# Section 1 - Title & Hook: 8s (2 play + wait(3) + wait(3))
+# Section 2 - Definition: 20s (5 play + wait(3)*3 + wait(2)*2)
+# Section 3 - Core Concept: 25s (6 play + wait(3)*4 + wait(2)*2)
+# Section 4 - Visual Demo: 25s (6 play + wait(3)*4 + wait(2)*2)
+# Section 5 - Example: 22s (5 play + wait(3)*3 + wait(2)*3)
+# Section 6 - Summary: 15s (4 play + wait(3)*2 + wait(2)*2)
+# TOTAL: 115 seconds ✓
+```
 
-RULES:
-- Maximum 25 wait() calls
-- Average wait() = 2-3 seconds
-- MUST include time budget comment at top of construct()
-- If running long, CUT content, don't speed up
+MANDATORY STRUCTURE (6 full sections, each with MULTIPLE animations):
+1. Title & Hook (6-10s): Title animation + engaging intro visual + wait(3)
+2. What is it? Definition (18-22s): Multiple text reveals, diagram, wait(3) between each
+3. Core Mechanism/How it works (22-28s): Step-by-step breakdown with animations
+4. Visual Demonstration (22-28s): Show the concept in action with detailed visualization
+5. Concrete Example with walkthrough (18-24s): Real-world application
+6. Summary & Key Points (12-18s): Recap main ideas with final visual
+
+TIMING RULES (STRICT):
+- MINIMUM 30 self.wait() calls total (averaging 2-3 seconds each)
+- Use self.wait(3) liberally - this is a DEEP DIVE, let viewers absorb content
+- Each section MUST have at least 4 wait() calls
+- Use run_time=2 or run_time=2.5 for complex animations
+- NEVER rush - if you're under 110 seconds, ADD MORE CONTENT AND WAITS
+
+VISUAL QUALITY FOR DEEP DIVE:
+- Build diagrams progressively (show each part, explain, then next)
+- Use Indicate() and Circumscribe() to highlight key elements
+- Add labeled arrows and annotations for complex visuals
+- Transform between related concepts to show connections
+- Include specific examples, not just abstract concepts
 """
 }
 
@@ -191,6 +204,47 @@ DURATION REQUIREMENT:
 - Movement: `shift()`, `move_to()` with smooth animations
 - ALWAYS chain related animations: `self.play(Create(a), Create(b))`
 - For complex diagrams: Build incrementally, showing one part at a time
+
+**COMPLEX TOPIC VISUALIZATION (CRITICAL FOR ACCURACY)**:
+When explaining technical/scientific topics, use ACCURATE visual representations:
+
+For ALGORITHMS (sorting, searching, etc.):
+- Show actual data structures with labeled values
+- Animate each step of the algorithm with arrows showing comparisons/swaps
+- Use color coding: current element (YELLOW), compared (BLUE), sorted (GREEN)
+- Show step counters and complexity notation
+
+For NEURAL NETWORKS / ML:
+- Draw actual network architecture with proper layer shapes
+- Show data flow with animated arrows
+- Label layer types (Input, Conv, Pool, Dense, Output)
+- Show dimensions/shapes at each layer
+- Animate forward pass with colored activations
+
+For MATH / PHYSICS:
+- Use proper mathematical notation (MathTex)
+- Show equations step-by-step with annotations
+- Animate graphs and functions with actual plot data
+- Include units and variable labels
+- Show relationships between concepts visually
+
+For CS CONCEPTS (data structures, design patterns):
+- Draw the actual structure (tree, graph, stack, queue)
+- Show operations with animations (insert, delete, traverse)
+- Use consistent visual language (nodes, edges, pointers)
+- Label memory addresses or indices where relevant
+
+For PROCESSES / WORKFLOWS:
+- Use flowchart style with proper symbols
+- Animate the flow with moving highlights
+- Show decision branches clearly
+- Include timing or sequence indicators
+
+GENERAL ACCURACY RULES:
+- RESEARCH the topic before generating - use correct terminology
+- Show PROPORTIONS correctly (e.g., scale matters for size comparisons)
+- Use REAL examples, not made-up data
+- Include CONTEXT - why this matters, where it's used
 
 **Scene Structure**:
 ```
