@@ -3,6 +3,7 @@ import { Wand2, ChevronDown, Download, Loader2, Code, Share2, Check, Sparkles, C
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { HistoryItem } from './Sidebar';
+import { useUser } from '@clerk/nextjs';
 
 interface AnimationGeneratorProps {
     initialData?: HistoryItem | null;
@@ -15,6 +16,7 @@ interface ProgressStep {
     message: string;
     video_url?: string;
     code?: string;
+    chat_id?: string;  // MongoDB chat ID
 }
 
 const PROGRESS_STEPS = [
@@ -27,6 +29,7 @@ const PROGRESS_STEPS = [
 ];
 
 export function AnimationGenerator({ initialData, onGenerateComplete }: AnimationGeneratorProps) {
+    const { user, isSignedIn } = useUser();
     const [prompt, setPrompt] = useState('');
     const [length, setLength] = useState('Short (5s)');
     const [loading, setLoading] = useState(false);
@@ -75,7 +78,11 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ prompt, length }),
+                body: JSON.stringify({
+                    prompt,
+                    length,
+                    clerk_id: isSignedIn ? user?.id : undefined
+                }),
             });
 
             if (!response.ok) {
@@ -107,9 +114,9 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
                                 setCode(data.code);
                                 setLoading(false);
 
-                                // Notify parent to save history
+                                // Notify parent to save/update history
                                 onGenerateComplete({
-                                    id: crypto.randomUUID(),
+                                    id: data.chat_id || crypto.randomUUID(),
                                     prompt: prompt,
                                     timestamp: Date.now(),
                                     videoUrl: data.video_url,

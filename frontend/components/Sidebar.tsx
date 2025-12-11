@@ -1,4 +1,4 @@
-import { Plus, MessageSquare, Trash2, X, PanelLeftClose, PanelLeftOpen, LogIn, UserPlus } from 'lucide-react';
+import { Plus, MessageSquare, Trash2, X, PanelLeftClose, PanelLeftOpen, LogIn, UserPlus, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { useEffect, useState } from 'react';
@@ -21,6 +21,7 @@ interface SidebarProps {
     onClose: () => void; // Mobile close
     isDesktopCollapsed: boolean;
     onDesktopToggle: () => void;
+    isLoading?: boolean; // Loading state for history
 }
 
 export function Sidebar({
@@ -31,7 +32,8 @@ export function Sidebar({
     isOpen,
     onClose,
     isDesktopCollapsed,
-    onDesktopToggle
+    onDesktopToggle,
+    isLoading = false
 }: SidebarProps) {
     return (
         <>
@@ -134,7 +136,14 @@ export function Sidebar({
 
                 {/* History List */}
                 <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1 scrollbar-thin scrollbar-thumb-muted scrollbar-track-transparent">
-                    {history.length === 0 && !isDesktopCollapsed && (
+                    {isLoading && !isDesktopCollapsed && (
+                        <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
+                            <Loader2 className="w-6 h-6 animate-spin text-orange-500 mb-2" />
+                            <span className="text-sm">Loading history...</span>
+                        </div>
+                    )}
+
+                    {!isLoading && history.length === 0 && !isDesktopCollapsed && (
                         <div className="text-center text-muted-foreground py-10 px-4 text-sm">
                             Create a new project to get started.
                         </div>

@@ -3,6 +3,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from contextlib import asynccontextmanager
+from typing import Optional
+from datetime import datetime
+from bson import ObjectId
 import os
 import json
 import asyncio
@@ -10,8 +14,21 @@ import uvicorn
 from .llm_service import generate_manim_code
 from .manim_service import execute_manim_code
 from .s3_service import generate_cloudfront_signed_url
+from .database import connect_to_mongo, close_mongo_connection, get_chats_collection
+from .models import ChatResponse, ChatListResponse
 
-app = FastAPI(title="Prompt to Animate API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Handle startup and shutdown events."""
+    # Startup
+    await connect_to_mongo()
+    yield
+    # Shutdown
+    await close_mongo_connection()
+
+
+app = FastAPI(title="Prompt to Animate API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,6 +46,7 @@ app.mount("/videos", StaticFiles(directory="generated_animations"), name="videos
 class AnimationRequest(BaseModel):
     prompt: str
     length: str = "Short (5s)"  # Default
+    clerk_id: Optional[str] = None  # Clerk user ID for authenticated users
 
 
 class AnimationResponse(BaseModel):
@@ -72,6 +90,7 @@ async def generate_animation(request: AnimationRequest):
 async def generate_animation_stream(request: AnimationRequest):
     """
     Streaming endpoint that sends progress updates as Server-Sent Events.
+    Now saves chat to MongoDB if clerk_id is provided.
     """
     async def event_generator():
         try:
@@ -103,8 +122,29 @@ async def generate_animation_stream(request: AnimationRequest):
             else:
                 # Fallback to local URL if S3 upload failed
                 video_url = f"http://localhost:8000/videos/{local_filename}"
+                s3_key = ""  # Empty string for local fallback
             
-            yield f"data: {json.dumps({'step': 6, 'status': 'complete', 'message': 'Video ready!', 'video_url': video_url, 'code': code})}\n\n"
+            # Save to MongoDB if user is authenticated
+            chat_id = None
+            if request.clerk_id:
+                try:
+                    chats_collection = await get_chats_collection()
+                    chat_doc = {
+                        "clerk_id": request.clerk_id,
+                        "prompt": request.prompt,
+                        "length": request.length,
+                        "video_url": video_url,
+                        "s3_key": s3_key or "",
+                        "code": code,
+                        "created_at": datetime.utcnow()
+                    }
+                    result = await chats_collection.insert_one(chat_doc)
+                    chat_id = str(result.inserted_id)
+                    print(f"✅ Chat saved to MongoDB: {chat_id}")
+                except Exception as db_error:
+                    print(f"⚠️ Failed to save chat to MongoDB: {db_error}")
+            
+            yield f"data: {json.dumps({'step': 6, 'status': 'complete', 'message': 'Video ready!', 'video_url': video_url, 'code': code, 'chat_id': chat_id})}\n\n"
             
         except Exception as e:
             yield f"data: {json.dumps({'step': -1, 'status': 'error', 'message': str(e)})}\n\n"
@@ -118,6 +158,110 @@ async def generate_animation_stream(request: AnimationRequest):
             "X-Accel-Buffering": "no",
         }
     )
+
+
+# ============== Chat History Endpoints ==============
+
+@app.get("/chats/{clerk_id}", response_model=ChatListResponse)
+async def get_user_chats(clerk_id: str):
+    """
+    Get all chats for a specific user by their Clerk ID.
+    Returns chats sorted by creation date (newest first).
+    """
+    try:
+        chats_collection = await get_chats_collection()
+        cursor = chats_collection.find({"clerk_id": clerk_id}).sort("created_at", -1)
+        chats = await cursor.to_list(length=100)  # Limit to 100 chats
+        
+        # Transform to response format
+        chat_responses = []
+        for chat in chats:
+            # Regenerate signed URL if s3_key exists
+            video_url = chat.get("video_url", "")
+            if chat.get("s3_key"):
+                try:
+                    video_url = generate_cloudfront_signed_url(chat["s3_key"])
+                except Exception:
+                    pass  # Keep existing URL if regeneration fails
+            
+            chat_responses.append(ChatResponse(
+                id=str(chat["_id"]),
+                prompt=chat.get("prompt", ""),
+                length=chat.get("length", "Short (5s)"),
+                video_url=video_url,
+                code=chat.get("code", ""),
+                created_at=chat.get("created_at", datetime.utcnow()).isoformat()
+            ))
+        
+        return ChatListResponse(chats=chat_responses, total=len(chat_responses))
+    
+    except Exception as e:
+        print(f"Error fetching chats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/chats/{clerk_id}/{chat_id}", response_model=ChatResponse)
+async def get_chat_detail(clerk_id: str, chat_id: str):
+    """
+    Get a specific chat by ID with a fresh signed URL.
+    """
+    try:
+        chats_collection = await get_chats_collection()
+        chat = await chats_collection.find_one({
+            "_id": ObjectId(chat_id),
+            "clerk_id": clerk_id
+        })
+        
+        if not chat:
+            raise HTTPException(status_code=404, detail="Chat not found")
+        
+        # Regenerate signed URL
+        video_url = chat.get("video_url", "")
+        if chat.get("s3_key"):
+            try:
+                video_url = generate_cloudfront_signed_url(chat["s3_key"])
+            except Exception:
+                pass
+        
+        return ChatResponse(
+            id=str(chat["_id"]),
+            prompt=chat.get("prompt", ""),
+            length=chat.get("length", "Short (5s)"),
+            video_url=video_url,
+            code=chat.get("code", ""),
+            created_at=chat.get("created_at", datetime.utcnow()).isoformat()
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error fetching chat: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/chats/{clerk_id}/{chat_id}")
+async def delete_chat(clerk_id: str, chat_id: str):
+    """
+    Delete a specific chat.
+    Only the owner (matching clerk_id) can delete their chat.
+    """
+    try:
+        chats_collection = await get_chats_collection()
+        result = await chats_collection.delete_one({
+            "_id": ObjectId(chat_id),
+            "clerk_id": clerk_id
+        })
+        
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Chat not found or unauthorized")
+        
+        return {"message": "Chat deleted successfully", "id": chat_id}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error deleting chat: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

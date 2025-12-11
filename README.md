@@ -35,9 +35,10 @@ Manimancer is a full-stack web application that generates high-quality education
 | ☁️ **Cloud Storage (S3)** | Videos stored securely in AWS S3 with CloudFront CDN delivery |
 | 🔐 **Signed URLs** | Time-limited, private access to videos via CloudFront signed URLs |
 | 🔐 **User Authentication** | Secure sign-in/sign-up with Clerk (modal-based, no redirect) |
+| 🗄️ **MongoDB Persistence** | Chat history and video references saved per-user in MongoDB Atlas |
 | 🌗 **Dark Mode** | Beautiful glassmorphic UI with full dark mode support |
 | 📱 **Responsive Design** | Works seamlessly on desktop and mobile devices |
-| 📚 **History Sidebar** | Browse and replay your previously generated animations |
+| 📚 **History Sidebar** | Browse and replay your previously generated animations (persisted) |
 | ⚡ **Real-Time Progress** | Server-Sent Events (SSE) provide live generation progress updates |
 
 ---
@@ -86,6 +87,7 @@ flowchart TB
     subgraph External["☁️ External Services"]
         Groq["Groq LLM API<br/>(Kimi K2 Model)"]
         ClerkAPI["Clerk API<br/>(Authentication)"]
+        MongoDB["MongoDB Atlas<br/>(Chat Persistence)"]
     end
     
     subgraph Storage["☁️ Cloud Storage (AWS)"]
@@ -109,6 +111,9 @@ flowchart TB
     Videos -->|"Upload"| S3
     S3 --> CloudFront
     CloudFront -->|"SSE: signed_url"| UI
+    API2 -->|"Save chat"| MongoDB
+    Sidebar -->|"GET /chats/{clerk_id}"| API1
+    API1 --> MongoDB
 ```
 
 ### Request Flow Sequence
@@ -172,6 +177,8 @@ sequenceDiagram
 | [Uvicorn](https://www.uvicorn.org/) | Latest | ASGI server |
 | [LangChain Groq](https://python.langchain.com/) | Latest | LLM integration |
 | [Manim CE](https://www.manim.community/) | Latest | Mathematical animation engine |
+| [Motor](https://motor.readthedocs.io/) | Latest | Async MongoDB driver (motor.motor_asyncio) |
+| [PyMongo](https://pymongo.readthedocs.io/) | Latest | MongoDB driver (used by Motor) |
 | [Boto3](https://boto3.amazonaws.com/v1/documentation/api/latest/index.html) | Latest | AWS SDK for Python (S3 uploads) |
 | [Cryptography](https://cryptography.io/) | Latest | RSA signing for CloudFront URLs |
 | [python-dotenv](https://github.com/theskumar/python-dotenv) | Latest | Environment variable management |
@@ -192,16 +199,18 @@ sequenceDiagram
 ```
 prompt_to_animate/
 │
-├── .env                              # ⚠️ Backend: GROQ_API_KEY
+├── .env                              # ⚠️ Backend: GROQ_API_KEY, AWS, MongoDB
 ├── .gitignore                        # Git ignore rules
 ├── README.md                         # This file
 │
 ├── backend/                          # 🐍 Python FastAPI Backend
 │   ├── __init__.py                   # Package marker
-│   ├── main.py                       # FastAPI app, routes (/generate, /generate-stream)
+│   ├── main.py                       # FastAPI app, routes (/generate, /generate-stream, /chats)
 │   ├── llm_service.py                # Prompt engineering, Groq LLM integration
 │   ├── manim_service.py              # Manim CLI execution, S3 upload integration
 │   ├── s3_service.py                 # ⚠️ AWS S3 upload + CloudFront signed URL generation
+│   ├── database.py                   # MongoDB connection management (Motor async)
+│   ├── models.py                     # Pydantic schemas for chat documents
 │   ├── temp/                         # 🔄 Temporary Python scripts (auto-cleaned)
 │   │   └── .gitkeep
 │   └── venv/                         # 🔄 Python virtual environment
@@ -292,7 +301,7 @@ python -m venv venv
 source venv/bin/activate
 
 # Install Python dependencies
-pip install fastapi uvicorn langchain-groq python-dotenv manim boto3 cryptography
+pip install fastapi uvicorn langchain-groq python-dotenv manim boto3 cryptography motor pymongo
 
 # Return to project root
 cd ..
@@ -316,11 +325,17 @@ S3_BUCKET_NAME=your_bucket_name
 CLOUDFRONT_DOMAIN=your_distribution.cloudfront.net
 CLOUDFRONT_KEY_PAIR_ID=your_key_pair_id
 CLOUDFRONT_PRIVATE_KEY_PATH=./private_key.pem
+
+# MongoDB Configuration (for chat history persistence)
+MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/database_name
+MONGODB_DATABASE=prompt_to_animate
 ```
 
 > 🔑 **Get your FREE Groq API key:** [console.groq.com](https://console.groq.com/) → Sign up → Create API Key
 
 > ☁️ **AWS credentials are optional for local development.** If not configured, videos will be served locally from `/videos/`.
+
+> 🗄️ **Get your FREE MongoDB Atlas connection string:** [mongodb.com/cloud/atlas](https://www.mongodb.com/cloud/atlas) → Create a cluster → Connect → Drivers → Copy connection string
 
 #### 4️⃣ Set Up AWS S3 + CloudFront (Optional but Recommended)
 
@@ -515,12 +530,39 @@ data: {"step": 4, "status": "rendering", "message": "Rendering animation frames.
 
 data: {"step": 5, "status": "finalizing", "message": "Finalizing video..."}
 
-data: {"step": 6, "status": "complete", "message": "Video ready!", "video_url": "...", "code": "..."}
+data: {"step": 6, "status": "complete", "message": "Video ready!", "video_url": "...", "code": "...", "chat_id": "..."}
 ```
+
+#### `GET /chats/{clerk_id}`
+
+Get all chats for a specific user (requires Clerk user ID).
+
+**Response:**
+```json
+{
+  "chats": [
+    {
+      "id": "676...",
+      "prompt": "Explain the Pythagorean theorem",
+      "length": "Medium (15s)",
+      "video_url": "https://cloudfront.../video.mp4",
+      "code": "from manim import *...",
+      "created_at": "2025-12-11T14:30:00Z"
+    }
+  ],
+  "total": 1
+}
+```
+
+#### `GET /chats/{clerk_id}/{chat_id}`
+
+Get a specific chat by ID with a fresh signed URL.
+
+**Response:** Single chat object (same schema as above)
 
 #### `GET /videos/{filename}`
 
-Static file server for generated videos.
+Static file server for generated videos (fallback for local development).
 
 ---
 
@@ -621,6 +663,10 @@ The `UserButton` in `Sidebar.tsx` can be customized:
 | Signed URL not working | Verify `CLOUDFRONT_KEY_PAIR_ID` matches the public key ID in CloudFront |
 | \"Missing Key\" error | Ensure `private_key.pem` exists at path specified in `CLOUDFRONT_PRIVATE_KEY_PATH` |
 | Video plays locally but not CloudFront | Check S3 bucket policy allows CloudFront access (OAC) |
+| ❌ MongoDB connection failed | Check `MONGODB_URI` has no trailing whitespace, verify credentials are correct |
+| "ModuleNotFoundError: bson" | Run `pip install pymongo` (bson comes with pymongo, not standalone) |
+| Chat history not saving | Ensure `MONGODB_URI` and `MONGODB_DATABASE` are set in `.env` |
+| History sidebar empty | Verify user is signed in (chats are linked to Clerk user ID) |
 
 ### Debug Commands
 
