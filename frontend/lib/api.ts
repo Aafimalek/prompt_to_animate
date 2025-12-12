@@ -4,7 +4,7 @@
  * Handles all API calls to the backend for chat history management.
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export interface Chat {
     id: string;

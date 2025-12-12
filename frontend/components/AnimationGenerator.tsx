@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Wand2, ChevronDown, Download, Loader2, Code, Share2, Check, Sparkles, Cpu, Film, Package, LogIn } from 'lucide-react';
+import { Wand2, ChevronDown, Download, Loader2, Code, Share2, Check, Sparkles, Film, Package, LogIn } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { HistoryItem } from './Sidebar';
 import { useUser, SignInButton } from '@clerk/nextjs';
+import { API_BASE_URL } from '@/lib/api';
 
 interface AnimationGeneratorProps {
     initialData?: HistoryItem | null;
@@ -73,7 +74,7 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
         setCurrentProgress(null);
 
         try {
-            const response = await fetch('http://localhost:8000/generate-stream', {
+            const response = await fetch(`${API_BASE_URL}/generate-stream`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -134,7 +135,7 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
                             } else if (data.status === 'error') {
                                 throw new Error(data.message);
                             }
-                        } catch (parseError) {
+                        } catch {
                             // Ignore parse errors for incomplete chunks
                         }
                     }
@@ -168,8 +169,8 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
             if (!completed) {
                 setError('Generation ended unexpectedly. Please try again.');
             }
-        } catch (err: any) {
-            setError(err.message || 'Something went wrong');
+        } catch (err: unknown) {
+            setError((err as Error).message || 'Something went wrong');
             setLoading(false);
         }
     };

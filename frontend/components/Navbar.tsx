@@ -16,6 +16,7 @@ export function Navbar({ onMenuClick, isDesktopCollapsed = true }: NavbarProps) 
     const [mounted, setMounted] = useState(false)
 
     useEffect(() => {
+        // eslint-disable-next-line
         setMounted(true)
     }, [])
 

@@ -6,7 +6,6 @@ import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
 import { AnimationGenerator } from '@/components/AnimationGenerator';
 import { PricingModal } from '@/components/PricingModal';
-import { Menu } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUser } from '@clerk/nextjs';
 import { getUserChats, deleteChat, Chat } from '@/lib/api';

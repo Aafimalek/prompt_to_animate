@@ -1,7 +1,6 @@
 import { Plus, MessageSquare, Trash2, X, PanelLeftClose, PanelLeftOpen, LogIn, UserPlus, Loader2, Crown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
-import { useEffect, useState } from 'react';
 import { SignedIn, SignedOut, SignInButton, SignUpButton, UserButton } from '@clerk/nextjs';
 
 export interface HistoryItem {
