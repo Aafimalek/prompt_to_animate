@@ -21,6 +21,7 @@ export default function Home() {
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [isPricingOpen, setIsPricingOpen] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [paymentMessage, setPaymentMessage] = useState('Credits added to your account');
 
   // Handle payment success from URL params
   useEffect(() => {
@@ -31,25 +32,50 @@ export default function Home() {
       // Payment was successful - trigger webhook manually for local testing
       setPaymentSuccess(true);
 
-      // Call backend to add credits (simulates webhook for local testing)
-      fetch(`${API_BASE_URL}/webhook/payment`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          event_type: 'payment_succeeded',
-          clerk_id: user.id,
-          product_id: 'basic'  // Assume basic for now
-        })
-      }).then(() => {
-        console.log('Credits added via manual webhook');
-      }).catch(err => {
-        console.error('Failed to add credits:', err);
-      });
+      // Check if it's a subscription (Pro) or one-time (Basic)
+      // For now, we'll need to determine based on the product
+      // Try to get the last selected product from sessionStorage
+      const lastProduct = sessionStorage.getItem('last_selected_product') || 'basic';
+      const isSubscription = lastProduct.includes('pro') || lastProduct.includes('I7R3');
 
-      // Clear URL params after 3 seconds
+      if (isSubscription) {
+        // Pro subscription
+        setPaymentMessage('Pro subscription activated! 🚀');
+        fetch(`${API_BASE_URL}/webhook/payment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            event_type: 'subscription_active',
+            clerk_id: user.id
+          })
+        }).then(() => {
+          console.log('Pro subscription activated');
+        }).catch(err => {
+          console.error('Failed to activate subscription:', err);
+        });
+      } else {
+        // Basic credits
+        setPaymentMessage('5 credits added to your account');
+        fetch(`${API_BASE_URL}/webhook/payment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            event_type: 'payment_succeeded',
+            clerk_id: user.id,
+            product_id: 'basic'
+          })
+        }).then(() => {
+          console.log('Basic credits added');
+        }).catch(err => {
+          console.error('Failed to add credits:', err);
+        });
+      }
+
+      // Clear URL params after 5 seconds
       setTimeout(() => {
         window.history.replaceState({}, '', '/');
         setPaymentSuccess(false);
+        sessionStorage.removeItem('last_selected_product');
       }, 5000);
     }
   }, [searchParams, user?.id]);
@@ -207,7 +233,7 @@ export default function Home() {
             </div>
             <div>
               <p className="font-semibold">Payment Successful! 🎉</p>
-              <p className="text-sm text-white/80">Credits added to your account</p>
+              <p className="text-sm text-white/80">{paymentMessage}</p>
             </div>
           </div>
         </div>

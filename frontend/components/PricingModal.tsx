@@ -198,6 +198,9 @@ export function PricingModal({ isOpen, onClose }: PricingModalProps) {
                                             onClick={async () => {
                                                 if (tier.productId && user?.id) {
                                                     try {
+                                                        // Save product info for post-payment detection
+                                                        sessionStorage.setItem('last_selected_product', tier.name.toLowerCase());
+
                                                         const response = await fetch(
                                                             `/api/checkout?productId=${tier.productId}&metadata[clerk_id]=${user.id}`
                                                         );
