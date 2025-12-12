@@ -1,5 +1,8 @@
 import { clerkMiddleware } from '@clerk/nextjs/server'
 
+// Force Node.js runtime instead of Edge to support Clerk's required APIs
+export const runtime = 'nodejs'
+
 export default clerkMiddleware()
 
 export const config = {
