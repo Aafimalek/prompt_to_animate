@@ -38,6 +38,7 @@ Manimancer is a full-stack web application that generates high-quality education
 | 🔐 **Signed URLs** | Time-limited, private access to videos via CloudFront signed URLs |
 | 🔐 **User Authentication** | Secure sign-in/sign-up with Clerk (modal-based, no redirect) |
 | 🗄️ **MongoDB Persistence** | Chat history and video references saved per-user in MongoDB Atlas |
+| 💳 **Dodo Payments** | Secure payment processing for subscriptions and one-time purchases |
 | 💎 **Pricing Plans** | Free, Basic ($3), and Pro ($20/mo) tiers with usage limits |
 | 🌗 **Dark Mode** | Beautiful glassmorphic UI with full dark mode support |
 | 📱 **Responsive Design** | Works seamlessly on desktop and mobile devices |
@@ -163,7 +164,7 @@ sequenceDiagram
 
 | Technology | Version | Purpose |
 |:-----------|:--------|:--------|
-| [Next.js](https://nextjs.org/) | 16.0.8 | React framework with App Router |
+| [Next.js](https://nextjs.org/) | 16.0.10 | React framework with App Router |
 | [React](https://react.dev/) | 19.2.1 | UI component library |
 | [TypeScript](https://www.typescriptlang.org/) | 5.x | Type-safe JavaScript |
 | [TailwindCSS](https://tailwindcss.com/) | 4.x | Utility-first CSS framework |
@@ -171,6 +172,7 @@ sequenceDiagram
 | [Clerk](https://clerk.com/) | 6.36.2 | Authentication (modal-based sign in/up) |
 | [Lucide React](https://lucide.dev/) | 0.556.0 | Beautiful icon library |
 | [next-themes](https://github.com/pacocoursey/next-themes) | 0.4.6 | Dark mode support |
+| [@dodopayments/nextjs](https://dodopayments.com) | Latest | Payment processing SDK |
 
 ### Backend
 
@@ -223,14 +225,17 @@ prompt_to_animate/
 ├── public_key.pem                    # 🔄 CloudFront public key (uploaded to AWS)
 │
 ├── frontend/                         # ⚛️ Next.js 16 Frontend
-│   ├── .env.local                    # ⚠️ Frontend: Clerk API keys
-│   ├── middleware.ts                 # Clerk authentication middleware
+│   ├── .env.local                    # ⚠️ Frontend: Clerk + Dodo Payments keys
 │   ├── app/                          # Next.js App Router
 │   │   ├── layout.tsx                # Root layout (ClerkProvider, ThemeProvider)
 │   │   ├── page.tsx                  # Main page
 │   │   ├── globals.css               # Global styles & design tokens
 │   │   ├── favicon.ico               # App icon
-│   │   └── icon.svg                  # SVG icon
+│   │   ├── icon.svg                  # SVG icon
+│   │   └── api/                      # API Routes
+│   │       ├── checkout/route.ts     # Dodo Payments checkout handler
+│   │       ├── webhook/dodo/route.ts # Dodo Payments webhook handler
+│   │       └── customer-portal/route.ts # Subscription management
 │   ├── components/                   # React Components
 │   │   ├── AnimationGenerator.tsx    # Main generator with SSE progress
 │   │   ├── Sidebar.tsx               # History sidebar + Clerk auth + Upgrade button
@@ -417,9 +422,17 @@ CLERK_SECRET_KEY=sk_test_your_key_here
 # Redirect URLs (modal mode, redirect back to home)
 NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/
 NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/
+
+# Dodo Payments Configuration
+DODO_PAYMENTS_API_KEY=your_api_key_from_dashboard
+DODO_PAYMENTS_WEBHOOK_KEY=whsec_your_webhook_secret
+DODO_PAYMENTS_RETURN_URL=https://your-domain.com/
+DODO_PAYMENTS_ENVIRONMENT=live_mode
 ```
 
 > ⚠️ **Important:** Do NOT set `NEXT_PUBLIC_CLERK_SIGN_IN_URL` or `NEXT_PUBLIC_CLERK_SIGN_UP_URL` — the app uses modal mode.
+
+> 💳 **Get your Dodo Payments credentials:** [app.dodopayments.com](https://app.dodopayments.com) → Settings → API Keys
 
 #### 7️⃣ Run the Application
 

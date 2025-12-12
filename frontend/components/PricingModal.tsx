@@ -19,6 +19,7 @@ interface PricingTier {
     popular?: boolean;
     buttonText: string;
     buttonStyle: 'default' | 'gradient' | 'outline';
+    productId?: string;
 }
 
 const pricingTiers: PricingTier[] = [
@@ -43,6 +44,7 @@ const pricingTiers: PricingTier[] = [
         period: "one-time",
         description: "Great for occasional projects",
         icon: Zap,
+        productId: "pdt_9pgk0uVBWpT13GL0Mfqbc",
         features: [
             "5 videos at 1080p 60fps",
             "OR 2 videos at 4K 60fps",
@@ -59,6 +61,7 @@ const pricingTiers: PricingTier[] = [
         description: "For power users",
         icon: Crown,
         popular: true,
+        productId: "pdt_hf3NUNKCCKbDR5HKinOXI",
         features: [
             "Unlimited videos",
             "Up to 4K @ 60 FPS",
@@ -189,6 +192,19 @@ export function PricingModal({ isOpen, onClose }: PricingModalProps) {
 
                                         {/* CTA Button */}
                                         <button
+                                            onClick={async () => {
+                                                if (tier.productId) {
+                                                    try {
+                                                        const response = await fetch(`/api/checkout?productId=${tier.productId}`);
+                                                        const data = await response.json();
+                                                        if (data.checkout_url) {
+                                                            window.location.href = data.checkout_url;
+                                                        }
+                                                    } catch (error) {
+                                                        console.error('Checkout error:', error);
+                                                    }
+                                                }
+                                            }}
                                             className={cn(
                                                 "w-full py-2 px-3 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2",
                                                 tier.buttonStyle === 'gradient' && [
