@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Sidebar, HistoryItem } from '@/components/Sidebar';
 import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
@@ -8,16 +9,50 @@ import { AnimationGenerator } from '@/components/AnimationGenerator';
 import { PricingModal } from '@/components/PricingModal';
 import { cn } from '@/lib/utils';
 import { useUser } from '@clerk/nextjs';
-import { getUserChats, deleteChat, Chat } from '@/lib/api';
+import { getUserChats, deleteChat, Chat, API_BASE_URL } from '@/lib/api';
 
 export default function Home() {
   const { user, isSignedIn, isLoaded } = useUser();
+  const searchParams = useSearchParams();
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [currentChat, setCurrentChat] = useState<HistoryItem | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDesktopCollapsed, setIsDesktopCollapsed] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [isPricingOpen, setIsPricingOpen] = useState(false);
+  const [paymentSuccess, setPaymentSuccess] = useState(false);
+
+  // Handle payment success from URL params
+  useEffect(() => {
+    const status = searchParams.get('status');
+    const paymentId = searchParams.get('payment_id');
+
+    if (status === 'succeeded' && paymentId && user?.id) {
+      // Payment was successful - trigger webhook manually for local testing
+      setPaymentSuccess(true);
+
+      // Call backend to add credits (simulates webhook for local testing)
+      fetch(`${API_BASE_URL}/webhook/payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event_type: 'payment_succeeded',
+          clerk_id: user.id,
+          product_id: 'basic'  // Assume basic for now
+        })
+      }).then(() => {
+        console.log('Credits added via manual webhook');
+      }).catch(err => {
+        console.error('Failed to add credits:', err);
+      });
+
+      // Clear URL params after 3 seconds
+      setTimeout(() => {
+        window.history.replaceState({}, '', '/');
+        setPaymentSuccess(false);
+      }, 5000);
+    }
+  }, [searchParams, user?.id]);
 
   // Convert Chat from API to HistoryItem
   const chatToHistoryItem = (chat: Chat): HistoryItem => ({
@@ -160,6 +195,23 @@ export default function Home() {
 
       {/* Pricing Modal */}
       <PricingModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
+
+      {/* Payment Success Toast */}
+      {paymentSuccess && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-4">
+          <div className="flex items-center gap-3 px-6 py-4 rounded-2xl bg-gradient-to-r from-green-500 to-emerald-500 text-white shadow-2xl shadow-green-500/30">
+            <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <div>
+              <p className="font-semibold">Payment Successful! 🎉</p>
+              <p className="text-sm text-white/80">Credits added to your account</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
