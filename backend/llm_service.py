@@ -20,48 +20,27 @@ llm = ChatGroq(
     temperature=0.2  # Slightly higher for creativity, but still focused
 )
 
-# Detailed length guides with STRICT timing limits
+# Detailed length guides with STRICT timing limits - 3BLUE1BROWN STYLE
 LENGTH_GUIDE = {
-    "Short (5s)": """
-TARGET: 5-7 seconds. STRICT MAXIMUM: 7 seconds.
-⚠️ ANY VIDEO OVER 7 SECONDS IS UNACCEPTABLE.
-
-TIME BUDGET (you MUST follow this):
-- Title entrance: 1.5s (run_time=1, wait(0.5))
-- Main visual: 3-4s (run_time=1-2, wait(1-2))
-- Total wait() calls: MAX 2-3, each ≤1 second
-
-STRUCTURE:
-- 1 title card (1.5s total)
-- 1 main visual with the SINGLE core concept (3-4s)
-- THAT'S IT. No more. Keep it punchy.
-
-RULES:
-- Maximum 2 text elements on screen
-- DO NOT add explanations - just show the visual
-- Use self.wait(0.5) or self.wait(1) ONLY
-""",
-    
     "Medium (15s)": """
-TARGET: 15-17 seconds. STRICT MAXIMUM: 18 seconds.
-⚠️ ANY VIDEO OVER 18 SECONDS IS UNACCEPTABLE.
+TARGET: 15-18 seconds. STRICT MAXIMUM: 20 seconds.
+⚠️ ANY VIDEO OVER 20 SECONDS IS UNACCEPTABLE.
 
 TIME BUDGET:
-- Title: 2s (run_time=1, wait(1))
-- Section 1: 4-5s
-- Section 2: 4-5s
-- Section 3: 4-5s
-- Total: 14-17 seconds MAX
+- Title: 2-3s (run_time=1.5, wait(1))
+- Section 1: 5-6s (main concept introduction)
+- Section 2: 5-6s (visual demonstration)
+- Conclusion: 2-3s
 
 STRUCTURE:
-- Title/intro (2s)
-- 2-3 content sections (4-5s each)
+- Clean title with topic name (2-3s)
+- 2 well-paced content sections (5-6s each)
 - Clear transitions with FadeOut between sections
 
 RULES:
-- Maximum 4 total wait() calls
-- Each wait() is 1-2 seconds max
+- Maximum 5 total wait() calls, each 1-2 seconds
 - Count your seconds: animations default to ~1s each
+- Clear previous content before adding new
 """,
     
     "Long (1m)": """
@@ -69,23 +48,22 @@ TARGET: 55-65 seconds. STRICT MAXIMUM: 70 seconds.
 ⚠️ ANY VIDEO OVER 70 SECONDS IS UNACCEPTABLE.
 
 TIME BUDGET (calculate before coding):
-- Title: 4s
-- Section 1: 12-15s
-- Section 2: 15-18s
-- Section 3: 15-18s
-- Conclusion: 5-8s
-- TOTAL: 55-65 seconds
+- Title: 4-5s
+- Section 1: 12-15s (introduce topic)
+- Section 2: 15-18s (explain mechanism/process)
+- Section 3: 15-18s (examples/applications)
+- Conclusion: 6-8s
 
 STRUCTURE:
-- Title with brief intro (4s)
+- Title with brief intro (4-5s)
 - 3 main content sections (12-18s each)
-- Brief conclusion/summary (5-8s)
+- Brief conclusion/summary (6-8s)
 
 RULES:
-- Maximum 12 wait() calls total
+- Maximum 15 wait() calls total
 - Average wait() = 2 seconds
 - Clear each section with FadeOut before next
-- Count your time budget in comments
+- Write time budget in comments
 """,
     
     "Deep Dive (2m)": """
@@ -97,46 +75,78 @@ YOU MUST REACH AT LEAST 110 SECONDS. Count your time carefully!
 TIME BUDGET (MANDATORY - WRITE THIS COMMENT IN YOUR CODE):
 ```
 # TIME BUDGET PLAN:
-# Section 1 - Title & Hook: 8s (2 play + wait(3) + wait(3))
-# Section 2 - Definition: 20s (5 play + wait(3)*3 + wait(2)*2)
-# Section 3 - Core Concept: 25s (6 play + wait(3)*4 + wait(2)*2)
-# Section 4 - Visual Demo: 25s (6 play + wait(3)*4 + wait(2)*2)
-# Section 5 - Example: 22s (5 play + wait(3)*3 + wait(2)*3)
-# Section 6 - Summary: 15s (4 play + wait(3)*2 + wait(2)*2)
-# TOTAL: 115 seconds ✓
+# Section 1 - Title & Hook: 8-10s
+# Section 2 - Definition: 18-22s
+# Section 3 - Core Concept: 22-28s
+# Section 4 - Visual Demo: 22-28s
+# Section 5 - Example: 18-24s
+# Section 6 - Summary: 12-18s
+# TOTAL: 115-125 seconds ✓
 ```
 
-MANDATORY STRUCTURE (6 full sections, each with MULTIPLE animations):
-1. Title & Hook (6-10s): Title animation + engaging intro visual + wait(3)
-2. What is it? Definition (18-22s): Multiple text reveals, diagram, wait(3) between each
-3. Core Mechanism/How it works (22-28s): Step-by-step breakdown with animations
-4. Visual Demonstration (22-28s): Show the concept in action with detailed visualization
-5. Concrete Example with walkthrough (18-24s): Real-world application
-6. Summary & Key Points (12-18s): Recap main ideas with final visual
+MANDATORY STRUCTURE (6 full sections):
+1. Title & Hook (8-10s): Title + engaging intro visual + wait(3)
+2. What is it? (18-22s): Multiple text reveals, diagram
+3. Core Mechanism (22-28s): Step-by-step breakdown with animations
+4. Visual Demonstration (22-28s): Show the concept in action
+5. Concrete Example (18-24s): Real-world application
+6. Summary & Key Points (12-18s): Recap main ideas
 
-TIMING RULES (STRICT):
-- MINIMUM 30 self.wait() calls total (averaging 2-3 seconds each)
-- Use self.wait(3) liberally - this is a DEEP DIVE, let viewers absorb content
+TIMING RULES:
+- MINIMUM 30 self.wait() calls (averaging 2-3 seconds each)
+- Use self.wait(3) liberally - let viewers absorb content
 - Each section MUST have at least 4 wait() calls
 - Use run_time=2 or run_time=2.5 for complex animations
-- NEVER rush - if you're under 110 seconds, ADD MORE CONTENT AND WAITS
+""",
 
-VISUAL QUALITY FOR DEEP DIVE:
-- Build diagrams progressively (show each part, explain, then next)
-- Use Indicate() and Circumscribe() to highlight key elements
-- Add labeled arrows and annotations for complex visuals
-- Transform between related concepts to show connections
-- Include specific examples, not just abstract concepts
+    "Extended (5m)": """
+⚠️ CRITICAL: TARGET 280-320 SECONDS (4.5-5.5 MINUTES).
+This is a COMPREHENSIVE MINI-LECTURE. Think university-level explanation.
+
+MINIMUM: 280 seconds. MAXIMUM: 330 seconds.
+
+TIME BUDGET (MANDATORY - CALCULATE CAREFULLY):
+```
+# TIME BUDGET PLAN:
+# Section 1 - Title & Hook: 12-15s
+# Section 2 - Introduction & Overview: 30-40s
+# Section 3 - Fundamentals/Basics: 40-50s
+# Section 4 - Core Mechanism (Part A): 40-50s
+# Section 5 - Core Mechanism (Part B): 40-50s
+# Section 6 - Visual Demonstration: 35-45s
+# Section 7 - Real-World Examples: 35-45s
+# Section 8 - Summary & Key Takeaways: 20-30s
+# TOTAL: ~300 seconds (5 minutes) ✓
+```
+
+MANDATORY STRUCTURE (8 comprehensive sections):
+1. Title & Hook (12-15s): Engaging title + hook question/visual
+2. Introduction & Overview (30-40s): Set context, why this matters
+3. Fundamentals/Basics (40-50s): Foundation concepts, prerequisites
+4. Core Mechanism Part A (40-50s): First half of main explanation
+5. Core Mechanism Part B (40-50s): Second half, deeper details
+6. Visual Demonstration (35-45s): Detailed animated walkthrough
+7. Real-World Examples (35-45s): 2-3 practical applications
+8. Summary & Key Takeaways (20-30s): Recap all main points
+
+TIMING RULES (CRITICAL):
+- MINIMUM 60 self.wait() calls throughout
+- Use self.wait(3) and self.wait(4) frequently
+- Each section MUST have at least 6 wait() calls
+- Use run_time=2.5 or run_time=3 for important animations
+- Build diagrams progressively - never rush
+- This should feel like a relaxed, thorough explanation
 """
 }
 
 
 template = """
-You are an EXPERT Manim (Community Edition) Animation Developer and an EXPERT Educator.
+You are an EXPERT Manim (Community Edition) Animation Developer creating content in the style of 3BLUE1BROWN.
 Your animations are used by millions of students worldwide. They must be:
 1. **FACTUALLY ACCURATE** - All information MUST be correct. Double-check facts.
-2. **VISUALLY STUNNING** - Professional, polished, broadcast-quality animations.
-3. **PROPERLY TIMED** - Match the requested duration precisely.
+2. **VISUALLY STUNNING** - Professional, elegant animations like 3Blue1Brown videos.
+3. **PROPERLY TIMED** - Match the requested duration precisely (within ±5 seconds).
+4. **MATHEMATICALLY ELEGANT** - Smooth transformations, meaningful visuals, no clutter.
 
 ═══════════════════════════════════════════════════════════════════
 USER REQUEST: {prompt}
@@ -144,6 +154,35 @@ USER REQUEST: {prompt}
 DURATION REQUIREMENT:
 {length_instruction}
 ═══════════════════════════════════════════════════════════════════
+
+### 3BLUE1BROWN VISUAL STYLE (ESSENTIAL):
+Your animations should capture the essence of 3Blue1Brown videos:
+- **Mathematical elegance**: Smooth, continuous transformations between concepts
+- **Progressive reveals**: Build complexity step-by-step, never overwhelm
+- **Meaningful motion**: Every animation should teach, not just look pretty
+- **Calm pacing**: Let ideas breathe with adequate wait() calls
+- **Geometric beauty**: Use circles, lines, and curves as primary shapes
+- Use `Transform()` and `ReplacementTransform()` to morphg between related concepts
+- Camera movements should be smooth and purposeful (for 3D)
+
+### 3D ANIMATIONS (Use When Appropriate):
+For topics that benefit from 3D visualization (3D geometry, surfaces, spatial concepts):
+```python
+class GenScene(ThreeDScene):  # Use ThreeDScene instead of Scene
+    def construct(self):
+        # Set up 3D camera
+        self.set_camera_orientation(phi=75*DEGREES, theta=-45*DEGREES)
+        
+        # Create 3D objects
+        axes = ThreeDAxes()
+        sphere = Sphere(radius=1, color=BLUE)
+        surface = Surface(lambda u, v: [u, v, np.sin(u)*np.cos(v)], ...)
+        
+        # Camera animation
+        self.move_camera(phi=60*DEGREES, theta=30*DEGREES, run_time=2)
+```
+ONLY use ThreeDScene when the topic genuinely needs 3D (e.g., 3D surfaces, spheres, spatial relationships).
+For 2D topics (sorting algorithms, graphs, formulas), use regular `Scene`.
 
 ### FACTUAL ACCURACY (CRITICAL):
 - Research-level accuracy. If explaining a concept, use correct definitions.
@@ -154,13 +193,13 @@ DURATION REQUIREMENT:
 
 ### VISUAL QUALITY STANDARDS:
 
-**Color Palette** (use these for a professional look):
-- Primary: BLUE, BLUE_C, BLUE_D for main elements
-- Accent: YELLOW, GOLD for highlights and emphasis
-- Secondary: TEAL, GREEN for supporting elements
-- Warning/Important: RED, ORANGE for alerts
-- Text: WHITE on dark backgrounds, contrasting colors for emphasis
-- Background elements: Use opacity (e.g., BLUE.set_opacity(0.3))
+**Color Palette** (3Blue1Brown signature style):
+- Primary: BLUE_E, BLUE_D, BLUE_C for main elements (signature blue)
+- Accent: YELLOW, GOLD for highlights, emphasis, and key results
+- Secondary: TEAL_E, GREEN_D for supporting elements and comparisons
+- Contrast: MAROON, RED_D for important warnings or differences
+- Text: WHITE for main text, GRAY_B for labels
+- Background elements: Use opacity (e.g., BLUE.set_opacity(0.2))
 
 **Typography**:
 - Titles: `Text("Title", font_size=56, weight=BOLD, color=WHITE)`
@@ -295,6 +334,29 @@ RULE: If your animation seems long, REMOVE CONTENT. Do not try to speed up.
 - For simple text with symbols, use `Text()` instead of `MathTex()`
 - Always use raw strings: `MathTex(r"...")`
 - Escape backslashes properly
+
+### MANIM API PITFALLS (CRITICAL - WILL CAUSE ERRORS):
+⚠️ These are COMMON MISTAKES that will crash your code:
+
+1. **NEVER use `opacity` parameter** - Use `fill_opacity` or `stroke_opacity` instead:
+   ❌ `Surface(..., opacity=0.5)`
+   ✅ `Surface(..., fill_opacity=0.5)`
+
+2. **For 3D scenes, use ThreeDScene NOT Scene**:
+   ❌ `class GenScene(Scene):` with 3D objects
+   ✅ `class GenScene(ThreeDScene):` for 3D content
+
+3. **Surface requires specific syntax**:
+   ✅ `Surface(lambda u, v: np.array([u, v, func(u,v)]), u_range=[-2,2], v_range=[-2,2], fill_opacity=0.7)`
+
+4. **ThreeDAxes positioning**:
+   ✅ `axes.c2p(x, y, z)` to convert coordinates to point
+
+5. **Import numpy for 3D**:
+   ✅ `import numpy as np` at top of file for 3D math
+
+6. **Camera setup for 3D**:
+   ✅ `self.set_camera_orientation(phi=75*DEGREES, theta=-45*DEGREES)`
 
 ### EXAMPLE STRUCTURE FOR A QUALITY ANIMATION:
 

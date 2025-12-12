@@ -45,7 +45,7 @@ app.mount("/videos", StaticFiles(directory="generated_animations"), name="videos
 
 class AnimationRequest(BaseModel):
     prompt: str
-    length: str = "Short (5s)"  # Default
+    length: str = "Medium (15s)"  # Default
     clerk_id: Optional[str] = None  # Clerk user ID for authenticated users
 
 
@@ -195,7 +195,7 @@ async def get_user_chats(clerk_id: str):
             chat_responses.append(ChatResponse(
                 id=str(chat["_id"]),
                 prompt=chat.get("prompt", ""),
-                length=chat.get("length", "Short (5s)"),
+                length=chat.get("length", "Medium (15s)"),
                 video_url=video_url,
                 code=chat.get("code", ""),
                 created_at=chat.get("created_at", datetime.utcnow()).isoformat()
@@ -234,7 +234,7 @@ async def get_chat_detail(clerk_id: str, chat_id: str):
         return ChatResponse(
             id=str(chat["_id"]),
             prompt=chat.get("prompt", ""),
-            length=chat.get("length", "Short (5s)"),
+            length=chat.get("length", "Medium (15s)"),
             video_url=video_url,
             code=chat.get("code", ""),
             created_at=chat.get("created_at", datetime.utcnow()).isoformat()

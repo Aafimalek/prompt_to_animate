@@ -32,7 +32,7 @@ const PROGRESS_STEPS = [
 export function AnimationGenerator({ initialData, onGenerateComplete }: AnimationGeneratorProps) {
     const { user, isSignedIn } = useUser();
     const [prompt, setPrompt] = useState('');
-    const [length, setLength] = useState('Short (5s)');
+    const [length, setLength] = useState('Medium (15s)');
     const [loading, setLoading] = useState(false);
     const [videoUrl, setVideoUrl] = useState<string | null>(null);
     const [code, setCode] = useState<string | null>(null);
@@ -51,7 +51,7 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    const lengths = ['Short (5s)', 'Medium (15s)', 'Long (1m)', 'Deep Dive (2m)'];
+    const lengths = ['Medium (15s)', 'Long (1m)', 'Deep Dive (2m)', 'Extended (5m)'];
 
     useEffect(() => {
         if (initialData) {
@@ -133,10 +133,13 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
                                     code: data.code
                                 });
                             } else if (data.status === 'error') {
-                                throw new Error(data.message);
+                                setError(data.message || 'An error occurred during generation');
+                                setLoading(false);
+                                return;
                             }
-                        } catch {
-                            // Ignore parse errors for incomplete chunks
+                        } catch (parseError) {
+                            console.error('SSE parse error:', parseError, 'Line:', line);
+                            // Continue processing other lines
                         }
                     }
                 }
