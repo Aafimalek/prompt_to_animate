@@ -151,6 +151,7 @@ export default function Home() {
           <AnimationGenerator
             initialData={currentChat}
             onGenerateComplete={handleGenerateComplete}
+            onUpgradeClick={() => setIsPricingOpen(true)}
           />
         </div>
       </main>

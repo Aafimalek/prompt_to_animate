@@ -21,121 +21,158 @@ llm = ChatGroq(
 )
 
 # Detailed length guides with STRICT timing limits - 3BLUE1BROWN STYLE
+# NOTE: LLM consistently under-produces, so we DOUBLE the wait requirements
 LENGTH_GUIDE = {
     "Medium (15s)": """
-TARGET: 15-18 seconds. STRICT MAXIMUM: 20 seconds.
-⚠️ ANY VIDEO OVER 20 SECONDS IS UNACCEPTABLE.
+⏱️ TARGET: EXACTLY 15-20 SECONDS. Count every second!
 
-TIME BUDGET:
-- Title: 2-3s (run_time=1.5, wait(1))
-- Section 1: 5-6s (main concept introduction)
-- Section 2: 5-6s (visual demonstration)
-- Conclusion: 2-3s
+MANDATORY TIME BUDGET (ADD THIS AS A CODE COMMENT):
+```python
+# TIME BUDGET:
+# Title: 3s (Write + wait(2))
+# Main Visual: 8s (Create + wait(2) + animate + wait(2) + wait(2))
+# Conclusion: 4s (Transform + wait(3))
+# TOTAL: 15s ✓
+```
 
-STRUCTURE:
-- Clean title with topic name (2-3s)
-- 2 well-paced content sections (5-6s each)
-- Clear transitions with FadeOut between sections
+STRUCTURE (2 clear sections):
+1. Title card (3s): Write(title), wait(2)
+2. Main concept (12s): Create shapes, animate, multiple wait(2) calls
 
-RULES:
-- Maximum 5 total wait() calls, each 1-2 seconds
-- Count your seconds: animations default to ~1s each
-- Clear previous content before adding new
+TIMING COMMANDS YOU MUST USE:
+- self.wait(2) after EVERY major visual change
+- run_time=1.5 for animations
+- MINIMUM 6 wait() calls, each 2 seconds = 12+ seconds of pauses alone
+
+VALIDATION: Your play() calls + wait() calls MUST add up to 15+ seconds.
 """,
     
     "Long (1m)": """
-TARGET: 55-65 seconds. STRICT MAXIMUM: 70 seconds.
-⚠️ ANY VIDEO OVER 70 SECONDS IS UNACCEPTABLE.
+⏱️ TARGET: EXACTLY 55-65 SECONDS. This is a FULL MINUTE video.
 
-TIME BUDGET (calculate before coding):
-- Title: 4-5s
-- Section 1: 12-15s (introduce topic)
-- Section 2: 15-18s (explain mechanism/process)
-- Section 3: 15-18s (examples/applications)
-- Conclusion: 6-8s
+⚠️ COMMON MISTAKE: Videos come out 30-40s. You MUST add more content and wait() calls!
 
-STRUCTURE:
-- Title with brief intro (4-5s)
-- 3 main content sections (12-18s each)
-- Brief conclusion/summary (6-8s)
+MANDATORY TIME BUDGET (ADD THIS AS A CODE COMMENT):
+```python
+# TIME BUDGET:
+# Section 1 - Title: 5s (Write + wait(3) + wait(2))
+# Section 2 - Intro Concept: 15s (multiple animations + wait(3)*5)  
+# Section 3 - Core Explanation: 20s (step-by-step + wait(3)*6)
+# Section 4 - Example: 15s (demo + wait(3)*4)
+# Section 5 - Summary: 10s (recap + wait(3)*3)
+# TOTAL: 65s ✓
+```
 
-RULES:
-- Maximum 15 wait() calls total
-- Average wait() = 2 seconds
-- Clear each section with FadeOut before next
-- Write time budget in comments
+STRUCTURE (5 sections, NOT 3):
+1. Title & Hook (5s)
+2. Introduction/Definition (15s) 
+3. Core Concept Explanation (20s)
+4. Visual Example/Demo (15s)
+5. Summary (10s)
+
+TIMING COMMANDS:
+- MINIMUM 25 wait() calls throughout the video
+- Use wait(3) as your DEFAULT (not wait(1) or wait(2))
+- After EVERY text/shape appears: wait(3)
+- After EVERY transformation: wait(3)
+- run_time=2 for all major animations
+
+⚠️ SECTION CLEARING: At the END of each section, clear the screen:
+`self.play(FadeOut(*self.mobjects))`
+
+VALIDATION: 25 wait(3) calls = 75 seconds of pauses. Add animations on top.
 """,
     
     "Deep Dive (2m)": """
-⚠️ CRITICAL MINIMUM: 110 SECONDS. ANY VIDEO UNDER 110 SECONDS WILL BE REJECTED.
-TARGET: 115-125 seconds. This is a COMPREHENSIVE educational video.
+⏱️ TARGET: EXACTLY 110-130 SECONDS (2 full minutes).
 
-YOU MUST REACH AT LEAST 110 SECONDS. Count your time carefully!
+⚠️ CRITICAL: Your video MUST be at least 110 seconds. Count carefully!
 
-TIME BUDGET (MANDATORY - WRITE THIS COMMENT IN YOUR CODE):
+MANDATORY TIME BUDGET (ADD THIS EXACT COMMENT IN YOUR CODE):
+```python
+# TIME BUDGET - MUST TOTAL 120 SECONDS:
+# Section 1 - Title & Hook: 10s (title + hook visual + wait(3) + wait(3))
+# Section 2 - Definition: 20s (text reveals + diagram + wait(3)*6)
+# Section 3 - Mechanism Part A: 25s (step 1,2,3 + wait(3)*8)
+# Section 4 - Mechanism Part B: 25s (step 4,5,6 + wait(3)*8)
+# Section 5 - Visual Demo: 20s (animated walkthrough + wait(3)*6)
+# Section 6 - Summary: 20s (key points + final visual + wait(3)*6)
+# TOTAL: 120s ✓ (40+ wait calls × 3s average = 120s+)
 ```
-# TIME BUDGET PLAN:
-# Section 1 - Title & Hook: 8-10s
-# Section 2 - Definition: 18-22s
-# Section 3 - Core Concept: 22-28s
-# Section 4 - Visual Demo: 22-28s
-# Section 5 - Example: 18-24s
-# Section 6 - Summary: 12-18s
-# TOTAL: 115-125 seconds ✓
-```
 
-MANDATORY STRUCTURE (6 full sections):
-1. Title & Hook (8-10s): Title + engaging intro visual + wait(3)
-2. What is it? (18-22s): Multiple text reveals, diagram
-3. Core Mechanism (22-28s): Step-by-step breakdown with animations
-4. Visual Demonstration (22-28s): Show the concept in action
-5. Concrete Example (18-24s): Real-world application
-6. Summary & Key Points (12-18s): Recap main ideas
+MANDATORY STRUCTURE (6 substantial sections):
+1. Title & Hook (10s): Engaging title + hook question
+2. Definition (20s): What is this? Multiple reveals
+3. Mechanism Part A (25s): First half of how it works
+4. Mechanism Part B (25s): Second half, deeper
+5. Visual Demo (20s): Show it in action
+6. Summary (20s): Recap ALL key points
 
-TIMING RULES:
-- MINIMUM 30 self.wait() calls (averaging 2-3 seconds each)
-- Use self.wait(3) liberally - let viewers absorb content
-- Each section MUST have at least 4 wait() calls
-- Use run_time=2 or run_time=2.5 for complex animations
+TIMING COMMANDS (CRITICAL):
+- MINIMUM 40 wait() calls throughout
+- wait(3) is your DEFAULT - use it after EVERYTHING
+- Each section needs 6-8 wait() calls minimum
+- run_time=2.5 for main animations
+- Add wait(4) before transitions for extra breathing room
+
+⚠️ SECTION CLEARING (PREVENT OVERLAP):
+- At the END of each section: `self.play(FadeOut(*self.mobjects))`
+- Start each new section with a CLEAN screen
+
+DO THE MATH: 40 waits × 3 seconds = 120 seconds minimum.
 """,
 
     "Extended (5m)": """
-⚠️ CRITICAL: TARGET 280-320 SECONDS (4.5-5.5 MINUTES).
-This is a COMPREHENSIVE MINI-LECTURE. Think university-level explanation.
+⏱️ TARGET: EXACTLY 280-320 SECONDS (5 FULL MINUTES).
 
-MINIMUM: 280 seconds. MAXIMUM: 330 seconds.
+⚠️ CRITICAL WARNING: Previous attempts only hit 150s. You need DOUBLE the content!
 
-TIME BUDGET (MANDATORY - CALCULATE CAREFULLY):
+THIS IS A UNIVERSITY MINI-LECTURE. Take your time. Explain thoroughly.
+
+MANDATORY TIME BUDGET (ADD THIS EXACT COMMENT IN YOUR CODE):
+```python
+# TIME BUDGET - MUST TOTAL 300 SECONDS (5 MINUTES):
+# Section 1 - Title & Hook: 15s (dramatic title + hook + wait(4)*3)
+# Section 2 - Why This Matters: 35s (context + motivation + wait(4)*8)
+# Section 3 - Prerequisites/Basics: 40s (foundation + wait(4)*10)
+# Section 4 - Core Concept Part A: 45s (first half explanation + wait(4)*11)
+# Section 5 - Core Concept Part B: 45s (second half + wait(4)*11)  
+# Section 6 - Detailed Visual Demo: 40s (walk through example + wait(4)*10)
+# Section 7 - Real Applications: 40s (2-3 examples + wait(4)*10)
+# Section 8 - Summary & Takeaways: 40s (comprehensive recap + wait(4)*10)
+# TOTAL: 300s ✓ (80+ wait calls = 320s of pauses alone!)
 ```
-# TIME BUDGET PLAN:
-# Section 1 - Title & Hook: 12-15s
-# Section 2 - Introduction & Overview: 30-40s
-# Section 3 - Fundamentals/Basics: 40-50s
-# Section 4 - Core Mechanism (Part A): 40-50s
-# Section 5 - Core Mechanism (Part B): 40-50s
-# Section 6 - Visual Demonstration: 35-45s
-# Section 7 - Real-World Examples: 35-45s
-# Section 8 - Summary & Key Takeaways: 20-30s
-# TOTAL: ~300 seconds (5 minutes) ✓
-```
 
-MANDATORY STRUCTURE (8 comprehensive sections):
-1. Title & Hook (12-15s): Engaging title + hook question/visual
-2. Introduction & Overview (30-40s): Set context, why this matters
-3. Fundamentals/Basics (40-50s): Foundation concepts, prerequisites
-4. Core Mechanism Part A (40-50s): First half of main explanation
-5. Core Mechanism Part B (40-50s): Second half, deeper details
-6. Visual Demonstration (35-45s): Detailed animated walkthrough
-7. Real-World Examples (35-45s): 2-3 practical applications
-8. Summary & Key Takeaways (20-30s): Recap all main points
+MANDATORY STRUCTURE (8 FULL SECTIONS - NO SHORTCUTS):
+1. Title & Hook (15s): Dramatic entrance, pose a question
+2. Why This Matters (35s): Real-world impact, motivation  
+3. Prerequisites/Basics (40s): Foundation concepts needed
+4. Core Concept Part A (45s): Detailed first half
+5. Core Concept Part B (45s): Detailed second half
+6. Visual Demonstration (40s): Complete animated walkthrough
+7. Real Applications (40s): Multiple concrete examples
+8. Summary & Takeaways (40s): Recap EVERY major point
 
-TIMING RULES (CRITICAL):
-- MINIMUM 60 self.wait() calls throughout
-- Use self.wait(3) and self.wait(4) frequently
-- Each section MUST have at least 6 wait() calls
-- Use run_time=2.5 or run_time=3 for important animations
-- Build diagrams progressively - never rush
-- This should feel like a relaxed, thorough explanation
+TIMING COMMANDS (ABSOLUTELY REQUIRED):
+- MINIMUM 80 wait() calls (yes, eighty!)
+- wait(4) is your DEFAULT for this video length
+- Each section MUST have 8-12 wait() calls
+- run_time=3 for ALL major animations
+- Use wait(5) between sections for clear separation
+- Add self.wait(3) after EVERY single text or shape
+
+⚠️ SECTION CLEARING (CRITICAL FOR LONG VIDEOS):
+- At the END of EVERY section, ALWAYS clear the screen:
+  ```python
+  self.play(FadeOut(*self.mobjects))
+  self.wait(1)
+  ```
+- NEVER have text from one section still visible when next section starts
+- Before each new section: ensure screen is EMPTY, then add new content
+
+DO THE MATH: 80 waits × 4 seconds average = 320 seconds = 5+ minutes.
+
+PACING: This should feel SLOW and RELAXED. Viewers need time to think.
 """
 }
 
@@ -176,12 +213,59 @@ class GenScene(ThreeDScene):  # Use ThreeDScene instead of Scene
         # Create 3D objects
         axes = ThreeDAxes()
         sphere = Sphere(radius=1, color=BLUE)
-        surface = Surface(lambda u, v: [u, v, np.sin(u)*np.cos(v)], ...)
+        surface = Surface(lambda u, v: np.array([u, v, np.sin(u)*np.cos(v)]), ...)
         
         # Camera animation
         self.move_camera(phi=60*DEGREES, theta=30*DEGREES, run_time=2)
 ```
 ONLY use ThreeDScene when the topic genuinely needs 3D (e.g., 3D surfaces, spheres, spatial relationships).
+
+### ⚠️ 3D OVERLAP PREVENTION (CRITICAL FOR 3D SCENES):
+In 3D scenes, text and 3D objects MUST be shown SEPARATELY to avoid overlap:
+
+**RULE 1: NEVER show text and 3D objects at the same time**
+```python
+# WRONG - text overlaps with 3D surface:
+surface = Surface(...)
+text = Text("Explanation").to_edge(UP)
+self.play(Create(surface), Write(text))  # ❌ OVERLAP!
+
+# CORRECT - show separately:
+# Step 1: Show 3D object alone
+surface = Surface(...)
+self.play(Create(surface))
+self.wait(2)
+
+# Step 2: FadeOut 3D, then show text
+self.play(FadeOut(surface))
+text = Text("Explanation").to_edge(UP)
+self.play(Write(text))
+self.wait(2)
+
+# Step 3: FadeOut text, show 3D again if needed
+self.play(FadeOut(text))
+self.play(FadeIn(surface))
+```
+
+**RULE 2: For 3D scenes with labels, use fixed_in_frame_mobjects**
+```python
+# This keeps text fixed to camera (doesn't move with 3D rotation)
+label = Text("Label", font_size=32).to_corner(UL)
+self.add_fixed_in_frame_mobjects(label)  # Text stays in corner
+self.play(Write(label))
+```
+
+**RULE 3: Position 3D objects to leave space for text**
+```python
+# Scale down and position 3D objects to lower half of screen
+surface = Surface(...).scale(0.6).shift(DOWN * 0.5)
+axes = ThreeDAxes().scale(0.6).shift(DOWN * 0.5)
+# Now upper area is free for fixed text labels
+```
+
+**RULE 4: Clear screen between 3D and text sections**
+- When transitioning from 3D to text: `self.play(FadeOut(*self.mobjects))`
+- When transitioning from text to 3D: `self.play(FadeOut(*self.mobjects))`
 For 2D topics (sorting algorithms, graphs, formulas), use regular `Scene`.
 
 ### FACTUAL ACCURACY (CRITICAL):
@@ -212,37 +296,77 @@ For 2D topics (sorting algorithms, graphs, formulas), use regular `Scene`.
 - Center important content: `.move_to(ORIGIN)` or `.to_edge(UP)`
 - Group related items: `VGroup(a, b, c).arrange(DOWN, buff=0.5)`
 - Use consistent spacing: `buff=0.5` for tight, `buff=1` for loose
-- Keep content within visible bounds (stay within 5.5 units from center)
+- **BOUNDS CHECK**: Keep ALL content within visible frame (x: -6.5 to 6.5, y: -3.5 to 3.5)
 
-⚠️ OVERLAP PREVENTION RULES (MUST FOLLOW):
-- ALWAYS clear screen between MAJOR sections: `self.play(FadeOut(*self.mobjects))`
-- TEXT LIMIT: Maximum 2-3 text labels visible at once (prevents reading confusion)
-- VISUAL ELEMENTS: Can show more shapes/diagrams if arranged properly using:
-  * `VGroup(...).arrange(RIGHT, buff=0.3)` for horizontal layouts
-  * `VGroup(...).arrange(DOWN, buff=0.3)` for vertical layouts
-  * Grid layouts for complex diagrams like CNN layers
-- For COMPLEX DIAGRAMS (CNN, neural networks, flowcharts):
-  * Build progressively: show one component, explain, then add next
-  * Use `.scale(0.5)` to `.scale(0.7)` for fitting multiple components
-  * Group related elements: `layer1 = VGroup(nodes, connections)`
-  * Use `.shift()` to position groups in different screen areas
-- Reserve screen ZONES (don't put text in diagram area):
-  * TOP ZONE (y > 2.5): Titles only
-  * CENTER ZONE (-2.5 < y < 2.5): Main diagrams
-  * BOTTOM ZONE (y < -2.5): Explanatory text, formulas
-- Position EVERY element explicitly with:
-  * `.to_edge(UP/DOWN/LEFT/RIGHT)`
-  * `.next_to(other_element, direction, buff=0.5)`
-- For long text: `Text(...).scale_to_fit_width(12)` to prevent overflow
-- When adding new elements, decide: keep existing OR fade them out
+⚠️ OVERLAP PREVENTION RULES:
 
-**Animation Quality**:
-- Entrance: `Write()` for text, `Create()` for shapes, `GrowFromCenter()` for emphasis
-- Transitions: `FadeOut()` old content BEFORE `FadeIn()` new content
-- Highlights: `Indicate()`, `Circumscribe()`, `Flash()` for emphasis
-- Movement: `shift()`, `move_to()` with smooth animations
-- ALWAYS chain related animations: `self.play(Create(a), Create(b))`
-- For complex diagrams: Build incrementally, showing one part at a time
+**TITLE RULE:**
+- Show title FIRST, ALONE on screen
+- FadeOut title BEFORE showing diagrams:
+  ```python
+  title = Text("Topic Name", font_size=48).to_edge(UP)
+  self.play(Write(title))
+  self.wait(1.5)
+  self.play(FadeOut(title))
+  # Now show diagrams
+  ```
+
+**TEXT vs VISUAL ELEMENTS (IMPORTANT DISTINCTION):**
+- TEXT elements (labels, explanations): MAX 2-3 on screen at once
+- VISUAL elements (shapes, diagrams, arrows): CAN have many, if properly arranged
+- For complex diagrams (neural networks, flowcharts, etc.):
+  * Scale the entire diagram: `.scale(0.5)` to `.scale(0.7)`
+  * Use `VGroup` to keep related parts together
+  * Position the group in CENTER zone
+
+**POSITIONING RULE:**
+- Reserve screen ZONES:
+  * TOP (y > 2.5): Titles only
+  * CENTER (-2 < y < 2): Main diagrams
+  * BOTTOM (y < -2.5): Text explanations
+- Always position explicitly: `.to_edge()`, `.move_to()`, `.next_to()`
+
+**PREVENTING OFF-SCREEN ELEMENTS:**
+- After creating shapes, ALWAYS scale and position BEFORE animating
+- Use `.scale_to_fit_width(12)` for wide content
+- Group and arrange: `VGroup(...).arrange(RIGHT, buff=0.3).move_to(ORIGIN)`
+- Check bounds: nothing should exceed x=±6 or y=±3
+
+**Animation Quality (3Blue1Brown Style)**:
+ENTRANCE ANIMATIONS (choose appropriately):
+- `Write()` for text - reveals character by character
+- `Create()` for shapes - draws the outline
+- `DrawBorderThenFill()` for filled shapes - elegant reveal  
+- `GrowFromCenter()` for dramatic emphasis
+- `FadeIn(shift=UP*0.3)` for subtle entrances
+
+TRANSFORMATIONS (the 3b1b signature):
+- `Transform(a, b)` - morph one shape into another
+- `ReplacementTransform(a, b)` - replace with morph effect
+- `TransformFromCopy(a, b)` - copy then morph
+- Use these to show RELATIONSHIPS between concepts
+
+TRANSITIONS BETWEEN SECTIONS:
+- `self.play(FadeOut(*self.mobjects))` - clear everything
+- `self.wait(2)` - pause after clearing
+- Then introduce new section
+
+HIGHLIGHTS & EMPHASIS:
+- `Indicate(obj)` - brief attention pulse
+- `Circumscribe(obj)` - draw circle around
+- `Flash(obj)` - bright flash
+- `obj.animate.set_color(YELLOW)` - color change
+
+SMOOTH MOTION:
+- Use `run_time=2` minimum for important animations
+- `rate_func=smooth` for natural movement (default)
+- Chain related animations: `self.play(Create(a), Create(b))`
+
+BUILD COMPLEXITY PROGRESSIVELY:
+- Show simple version first
+- Add details layer by layer
+- Explain each addition before adding more
+- Never show complex diagram all at once
 
 **COMPLEX TOPIC VISUALIZATION (CRITICAL FOR ACCURACY)**:
 When explaining technical/scientific topics, use ACCURATE visual representations:
@@ -357,6 +481,19 @@ RULE: If your animation seems long, REMOVE CONTENT. Do not try to speed up.
 
 6. **Camera setup for 3D**:
    ✅ `self.set_camera_orientation(phi=75*DEGREES, theta=-45*DEGREES)`
+
+7. **NEVER use `about_vector` in Rotate() - use `axis` instead**:
+   ❌ `Rotate(obj, angle=PI, about_vector=[1,0,0])`
+   ✅ `Rotate(obj, angle=PI, axis=RIGHT)`
+   ✅ `Rotate(obj, angle=PI, axis=np.array([1,0,0]))`
+
+8. **Rotate syntax for 3D objects**:
+   ✅ `self.play(Rotate(sphere, angle=PI, axis=UP, run_time=2))`
+   ✅ `sphere.rotate(PI/2, axis=RIGHT)` for instant rotation
+
+9. **ALWAYS close parentheses properly**:
+   ❌ `self.play(Rotate(sphere, angle=PI, axis=UP),` (missing closing paren)
+   ✅ `self.play(Rotate(sphere, angle=PI, axis=UP))`
 
 ### EXAMPLE STRUCTURE FOR A QUALITY ANIMATION:
 

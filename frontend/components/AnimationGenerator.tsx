@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Wand2, ChevronDown, Download, Loader2, Code, Share2, Check, Sparkles, Film, Package, LogIn } from 'lucide-react';
+import { Wand2, ChevronDown, Download, Loader2, Code, Share2, Check, Sparkles, Film, Package, LogIn, Crown, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { HistoryItem } from './Sidebar';
@@ -9,6 +9,7 @@ import { API_BASE_URL } from '@/lib/api';
 interface AnimationGeneratorProps {
     initialData?: HistoryItem | null;
     onGenerateComplete: (data: HistoryItem) => void;
+    onUpgradeClick?: () => void;
 }
 
 interface ProgressStep {
@@ -20,6 +21,14 @@ interface ProgressStep {
     chat_id?: string;  // MongoDB chat ID
 }
 
+interface UsageInfo {
+    tier: string;
+    used: number;
+    limit: number;
+    remaining: number;
+    basic_credits: number;
+}
+
 const PROGRESS_STEPS = [
     { id: 1, label: 'Analyzing Prompt', icon: Sparkles },
     { id: 2, label: 'Generating Code', icon: Code },
@@ -29,7 +38,7 @@ const PROGRESS_STEPS = [
     { id: 6, label: 'Complete', icon: Check },
 ];
 
-export function AnimationGenerator({ initialData, onGenerateComplete }: AnimationGeneratorProps) {
+export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeClick }: AnimationGeneratorProps) {
     const { user, isSignedIn } = useUser();
     const [prompt, setPrompt] = useState('');
     const [length, setLength] = useState('Medium (15s)');
@@ -39,6 +48,26 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
     const [error, setError] = useState<string | null>(null);
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const [currentProgress, setCurrentProgress] = useState<ProgressStep | null>(null);
+    const [usage, setUsage] = useState<UsageInfo | null>(null);
+
+    // Fetch usage on mount and after generation
+    const fetchUsage = async () => {
+        if (user?.id) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/usage/${user.id}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    setUsage(data);
+                }
+            } catch (error) {
+                console.error('Failed to fetch usage:', error);
+            }
+        }
+    };
+
+    useEffect(() => {
+        fetchUsage();
+    }, [user?.id]);
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -169,6 +198,9 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
             // Always set loading to false when stream ends
             setLoading(false);
 
+            // Refresh usage after generation
+            fetchUsage();
+
             if (!completed) {
                 setError('Generation ended unexpectedly. Please try again.');
             }
@@ -269,6 +301,47 @@ export function AnimationGenerator({ initialData, onGenerateComplete }: Animatio
                                     )}
                                 </AnimatePresence>
                             </div>
+
+                            {/* Usage Display */}
+                            {usage && isSignedIn && (
+                                <div className="flex items-center gap-2">
+                                    {/* Plan Badge */}
+                                    <div className={cn(
+                                        "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium",
+                                        usage.tier === 'pro'
+                                            ? "bg-gradient-to-r from-orange-500 to-orange-600 text-white"
+                                            : usage.basic_credits > 0
+                                                ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                                                : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400"
+                                    )}>
+                                        {usage.tier === 'pro' ? (
+                                            <Crown className="w-3 h-3" />
+                                        ) : usage.basic_credits > 0 ? (
+                                            <Zap className="w-3 h-3" />
+                                        ) : (
+                                            <Sparkles className="w-3 h-3" />
+                                        )}
+                                        <span>
+                                            {usage.tier === 'pro'
+                                                ? `Pro: ${usage.remaining}/${usage.limit}`
+                                                : usage.basic_credits > 0
+                                                    ? `${usage.basic_credits} credits left`
+                                                    : `${usage.used}/${usage.limit} used`
+                                            }
+                                        </span>
+                                    </div>
+
+                                    {/* Upgrade Button for Free users */}
+                                    {usage.tier === 'free' && usage.basic_credits === 0 && onUpgradeClick && (
+                                        <button
+                                            onClick={onUpgradeClick}
+                                            className="text-xs font-medium text-orange-500 hover:text-orange-600 hover:underline"
+                                        >
+                                            Upgrade
+                                        </button>
+                                    )}
+                                </div>
+                            )}
 
                             {isSignedIn ? (
                                 <motion.button

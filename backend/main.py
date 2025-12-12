@@ -16,6 +16,7 @@ from .manim_service import execute_manim_code
 from .s3_service import generate_cloudfront_signed_url
 from .database import connect_to_mongo, close_mongo_connection, get_chats_collection
 from .models import ChatResponse, ChatListResponse
+from .user_service import check_can_generate, increment_usage, get_user_usage, add_basic_credits, set_pro_subscription
 
 
 @asynccontextmanager
@@ -102,6 +103,12 @@ async def generate_animation_stream(request: AnimationRequest):
     
     async def event_generator():
         try:
+            # Step 0: Check usage limits
+            usage_check = await check_can_generate(request.clerk_id)
+            if not usage_check["allowed"]:
+                yield f"data: {json.dumps({'step': -1, 'status': 'error', 'message': usage_check['reason']})}\n\n"
+                return
+            
             # Step 1: Analyzing prompt
             yield f"data: {json.dumps({'step': 1, 'status': 'analyzing', 'message': 'Analyzing your prompt...'})}\n\n"
             await asyncio.sleep(0.5)
@@ -151,6 +158,9 @@ async def generate_animation_stream(request: AnimationRequest):
                     print(f"✅ Chat saved to MongoDB: {chat_id}")
                 except Exception as db_error:
                     print(f"⚠️ Failed to save chat to MongoDB: {db_error}")
+            
+            # Increment usage count after successful generation
+            await increment_usage(request.clerk_id)
             
             yield f"data: {json.dumps({'step': 6, 'status': 'complete', 'message': 'Video ready!', 'video_url': video_url, 'code': code, 'chat_id': chat_id})}\n\n"
             
@@ -269,6 +279,58 @@ async def delete_chat(clerk_id: str, chat_id: str):
         raise
     except Exception as e:
         print(f"Error deleting chat: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============== Usage & Credits Endpoints ==============
+
+@app.get("/usage/{clerk_id}")
+async def get_usage(clerk_id: str):
+    """Get user's current usage and tier info."""
+    try:
+        usage = await get_user_usage(clerk_id)
+        return usage
+    except Exception as e:
+        print(f"Error getting usage: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class WebhookPayload(BaseModel):
+    """Payload for payment webhook."""
+    event_type: str
+    clerk_id: str
+    product_id: Optional[str] = None
+
+
+@app.post("/webhook/payment")
+async def payment_webhook(payload: WebhookPayload):
+    """
+    Handle payment webhook from frontend.
+    Called when Dodo Payments webhook is received.
+    """
+    try:
+        print(f"🔔 Payment webhook: {payload.event_type} for {payload.clerk_id}")
+        
+        if payload.event_type == "payment_succeeded":
+            # Basic pack - add 5 credits
+            if payload.product_id and "basic" in payload.product_id.lower():
+                await add_basic_credits(payload.clerk_id, credits=5)
+                return {"success": True, "message": "Added 5 Basic credits"}
+        
+        elif payload.event_type == "subscription_active":
+            # Pro subscription activated
+            await set_pro_subscription(payload.clerk_id, active=True)
+            return {"success": True, "message": "Pro subscription activated"}
+        
+        elif payload.event_type == "subscription_cancelled":
+            # Pro subscription cancelled
+            await set_pro_subscription(payload.clerk_id, active=False)
+            return {"success": True, "message": "Pro subscription cancelled"}
+        
+        return {"success": True, "message": "Webhook processed"}
+    
+    except Exception as e:
+        print(f"Error processing payment webhook: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

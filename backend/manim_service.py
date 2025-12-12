@@ -62,7 +62,36 @@ def execute_manim_code(code: str, upload_to_s3: bool = True) -> tuple[str, str]:
     # Check for rendering errors
     if result.returncode != 0:
         error_msg = result.stderr or result.stdout or "Unknown error"
-        raise Exception(f"Manim execution failed:\n{error_msg}")
+        
+        # Extract just the error type for cleaner user-facing message
+        import re
+        
+        # First, remove all progress bar lines (they contain | and percentages)
+        lines = error_msg.split('\n')
+        filtered_lines = []
+        for line in lines:
+            # Skip progress bar lines
+            if re.search(r'\d+%\s*\|', line):
+                continue
+            if line.startswith('Animation ') and 'it/s]' in line:
+                continue
+            filtered_lines.append(line)
+        
+        clean_msg = '\n'.join(filtered_lines)
+        
+        # Try to find the actual Python error
+        error_match = re.search(r'(TypeError|AttributeError|ValueError|NameError|SyntaxError|KeyError|IndexError|RuntimeError):\s*(.+)', clean_msg)
+        
+        if error_match:
+            error_type = error_match.group(1)
+            error_detail = error_match.group(2).strip()[:200]  # Limit length
+            clean_error = f"Code error ({error_type}): {error_detail}"
+        else:
+            # Get last meaningful lines
+            meaningful = [l.strip() for l in filtered_lines if l.strip() and not l.startswith('+')]
+            clean_error = meaningful[-1] if meaningful else "Rendering failed. Please try a simpler prompt."
+        
+        raise Exception(clean_error)
         
     # Locate the output file
     # Structure: output_root/videos/scene_{uuid}/1080p60/GenScene.mp4

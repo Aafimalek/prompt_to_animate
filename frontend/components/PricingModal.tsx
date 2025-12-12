@@ -3,6 +3,7 @@
 import { X, Crown, Check, Zap, Sparkles, Star } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
+import { useUser } from '@clerk/nextjs';
 
 interface PricingModalProps {
     isOpen: boolean;
@@ -44,7 +45,7 @@ const pricingTiers: PricingTier[] = [
         period: "one-time",
         description: "Great for occasional projects",
         icon: Zap,
-        productId: "pdt_9pgk0uVBWpT13GL0Mfqbc",
+        productId: "pdt_pYNjvm0Cxgf9D74vOIZxz",  // Test mode: Manimancer Basic
         features: [
             "5 videos at 1080p 60fps",
             "OR 2 videos at 4K 60fps",
@@ -61,11 +62,11 @@ const pricingTiers: PricingTier[] = [
         description: "For power users",
         icon: Crown,
         popular: true,
-        productId: "pdt_hf3NUNKCCKbDR5HKinOXI",
+        productId: "pdt_I7R3fBaxOnwnzOdMOtFKF",  // Test mode: Manimancer Pro
         features: [
-            "Unlimited videos",
-            "Up to 4K @ 60 FPS",
-            "Unlimited length",
+            "50 videos per month",
+            "4K @ 60 FPS quality",
+            "Up to 5 min length",
             "Priority processing",
             "Premium support"
         ],
@@ -75,6 +76,8 @@ const pricingTiers: PricingTier[] = [
 ];
 
 export function PricingModal({ isOpen, onClose }: PricingModalProps) {
+    const { user } = useUser();
+
     return (
         <AnimatePresence>
             {isOpen && (
@@ -193,9 +196,11 @@ export function PricingModal({ isOpen, onClose }: PricingModalProps) {
                                         {/* CTA Button */}
                                         <button
                                             onClick={async () => {
-                                                if (tier.productId) {
+                                                if (tier.productId && user?.id) {
                                                     try {
-                                                        const response = await fetch(`/api/checkout?productId=${tier.productId}`);
+                                                        const response = await fetch(
+                                                            `/api/checkout?productId=${tier.productId}&metadata[clerk_id]=${user.id}`
+                                                        );
                                                         const data = await response.json();
                                                         if (data.checkout_url) {
                                                             window.location.href = data.checkout_url;
