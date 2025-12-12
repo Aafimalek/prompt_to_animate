@@ -738,55 +738,124 @@ Manimancer uses [Clerk](https://clerk.com) for authentication with a **modal-bas
 
 ## 💎 Pricing Plans
 
-Manimancer offers three pricing tiers to suit different needs.
+Manimancer offers three pricing tiers with usage-based limits stored in MongoDB.
 
 ### Tier Comparison
 
 | Feature | Free ($0) | Basic ($3) | Pro ($20/mo) |
 |:--------|:----------|:-----------|:-------------|
-| **Videos per month** | 5 | 5-7 per purchase | Unlimited |
-| **Max Resolution** | 720p | 4K | 4K |
-| **Frame Rate** | 30 FPS | 60 FPS | 60 FPS |
-| **Max Length** | 30 seconds | 5 minutes | Unlimited |
-| **Priority Rendering** | ❌ | ✅ | ✅ |
-| **Premium Support** | ❌ | ❌ | ✅ |
+| **Videos** | 5/month | 5 one-time credits | 50/month |
+| **Reset** | 1st of each month | Never (one-time) | 30 days from purchase |
+| **Max Resolution** | 1080p | 1080p | 4K |
+| **Frame Rate** | 60 FPS | 60 FPS | 60 FPS |
+| **Max Length** | 1 minute | 5 minutes | 5 minutes |
 
 ### Plan Details
 
 #### Free Tier
-- 5 videos per month
-- 720p resolution at 30 FPS
-- Maximum 30 seconds per video
-- Basic support
+- **5 videos per month** (resets on the 1st)
+- 1080p @ 60fps quality
+- Maximum 1 minute per video
+- No credit card required
 
 #### Basic Tier ($3 one-time)
-- 5 videos at 1080p 60fps (max 5 mins each)
-- OR 2 videos at 4K 60fps (max 5 mins each)
-- Priority rendering queue
-- Email support
+- **5 video credits** (never expire)
+- Credits are consumed before free monthly limit
+- 1080p @ 60fps quality
+- Up to 5 minutes per video
+- One-time purchase, no subscription
 
-#### Pro Tier ($20/month)
-- Unlimited video generations
-- Up to 4K resolution at 60 FPS
-- No length restrictions
-- Priority processing
-- Premium support
-- Early access to new features
+#### Pro Tier ($20/month subscription)
+- **50 videos per month**
+- Resets **30 days from purchase date** (not 1st of month)
+- 4K @ 60fps quality
+- Up to 5 minutes per video
+- Priority rendering
+- **Upgrade button hides** when Pro is active
 
-### Upgrade Button
+### Usage Tracking System
 
-The **Upgrade** button (Crown icon) appears in the sidebar when signed in:
+All usage data is stored in MongoDB with the following schema:
+
+```json
+{
+  "clerk_id": "user_abc123",
+  "tier": "pro",
+  "basic_credits": 0,
+  "monthly_count": 3,
+  "month_reset_date": "2026-01-12T00:00:00Z",
+  "created_at": "2025-12-13T00:00:00Z",
+  "updated_at": "2025-12-13T00:30:00Z"
+}
+```
+
+### Credit Consumption Priority
+
+When a user generates a video, credits are consumed in this order:
+
+1. **Basic credits** (if available) → decremented first
+2. **Monthly count** → only if no basic credits remain
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|:---------|:-------|:------------|
+| `/usage/{clerk_id}` | GET | Get user's current tier and remaining credits |
+| `/webhook/payment` | POST | Handle Dodo Payments webhook events |
+
+### Webhook Events Handled
+
+| Event | Action |
+|:------|:-------|
+| `payment_succeeded` | Add 5 Basic credits |
+| `subscription_active` | Set tier to Pro, reset count to 0 |
+| `subscription_cancelled` | Downgrade to Free tier |
+
+### Frontend Visual Indicators
+
+The sidebar shows different states based on user tier:
+
+| Tier | Indicator | Upgrade Button |
+|:-----|:----------|:---------------|
+| Free | `✨ 2/5 used` | Visible |
+| Basic | `⚡ 3 credits` | Visible |
+| Pro | `👑 Pro: 5/50` | **Hidden** |
+
+### Dodo Payments Integration
+
+#### Product IDs (Live)
+
+| Product | Product ID |
+|:--------|:-----------|
+| Manimancer Basic | `pdt_9pgk0uVBWpT13GL0Mfqbc` |
+| Manimancer Pro | `pdt_hf3NUNKCCKbDR5HKinOXI` |
+
+#### Environment Variables
+
+```env
+# frontend/.env.local
+DODO_PAYMENTS_API_KEY=your_live_api_key
+DODO_PAYMENTS_WEBHOOK_KEY=whsec_your_webhook_secret
+DODO_PAYMENTS_RETURN_URL=https://manimancer.vercel.app/
+DODO_PAYMENTS_ENVIRONMENT=live_mode
+
+NEXT_PUBLIC_DODO_BASIC_PRODUCT_ID=pdt_9pgk0uVBWpT13GL0Mfqbc
+NEXT_PUBLIC_DODO_PRO_PRODUCT_ID=pdt_hf3NUNKCCKbDR5HKinOXI
+```
+
+#### Webhook Endpoint
+
+Set this URL in your Dodo Payments dashboard:
 
 ```
-┌─────────────────────┐
-│  [Crown] Upgrade    │  ← Orange gradient button
-├─────────────────────┤
-│  [Avatar] Account   │
-│  Manage profile     │
-└─────────────────────┘
+https://manimancer.vercel.app/api/webhook/dodo
 ```
 
-Clicking it opens the `PricingModal` component with all three tier options.
+The webhook handler:
+1. Receives events from Dodo Payments
+2. Extracts `clerk_id` from payment metadata
+3. Calls backend `/webhook/payment` to update user credits/tier
+4. Returns 200 OK to confirm receipt
 
 ---
 

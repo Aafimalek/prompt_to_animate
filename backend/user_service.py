@@ -65,10 +65,15 @@ async def get_or_create_user(clerk_id: str) -> Dict[str, Any]:
 
 
 def get_next_month_reset(from_date: datetime) -> datetime:
-    """Get the 1st of next month as reset date."""
+    """Get the 1st of next month as reset date (for free tier)."""
     if from_date.month == 12:
         return datetime(from_date.year + 1, 1, 1)
     return datetime(from_date.year, from_date.month + 1, 1)
+
+
+def get_subscription_reset(from_date: datetime) -> datetime:
+    """Get the date exactly 30 days from now (for Pro subscription)."""
+    return from_date + timedelta(days=30)
 
 
 async def check_and_reset_monthly(user: Dict[str, Any]) -> Dict[str, Any]:
@@ -221,7 +226,7 @@ async def set_pro_subscription(clerk_id: str, active: bool = True) -> bool:
                 "$set": {
                     "tier": "pro",
                     "monthly_count": 0,  # Reset on activation
-                    "month_reset_date": get_next_month_reset(now),
+                    "month_reset_date": get_subscription_reset(now),  # 30 days from purchase
                     "updated_at": now
                 }
             }

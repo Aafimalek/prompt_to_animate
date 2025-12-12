@@ -45,7 +45,7 @@ const pricingTiers: PricingTier[] = [
         period: "one-time",
         description: "Great for occasional projects",
         icon: Zap,
-        productId: "pdt_pYNjvm0Cxgf9D74vOIZxz",  // Test mode: Manimancer Basic
+        productId: "pdt_9pgk0uVBWpT13GL0Mfqbc",  // LIVE: Manimancer Basic
         features: [
             "5 videos at 1080p 60fps",
             "OR 2 videos at 4K 60fps",
@@ -62,7 +62,7 @@ const pricingTiers: PricingTier[] = [
         description: "For power users",
         icon: Crown,
         popular: true,
-        productId: "pdt_I7R3fBaxOnwnzOdMOtFKF",  // Test mode: Manimancer Pro
+        productId: "pdt_hf3NUNKCCKbDR5HKinOXI",  // LIVE: Manimancer Pro
         features: [
             "50 videos per month",
             "4K @ 60 FPS quality",

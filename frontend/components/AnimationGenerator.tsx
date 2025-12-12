@@ -10,6 +10,7 @@ interface AnimationGeneratorProps {
     initialData?: HistoryItem | null;
     onGenerateComplete: (data: HistoryItem) => void;
     onUpgradeClick?: () => void;
+    usageRefreshTrigger?: number;
 }
 
 interface ProgressStep {
@@ -38,7 +39,7 @@ const PROGRESS_STEPS = [
     { id: 6, label: 'Complete', icon: Check },
 ];
 
-export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeClick }: AnimationGeneratorProps) {
+export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeClick, usageRefreshTrigger }: AnimationGeneratorProps) {
     const { user, isSignedIn } = useUser();
     const [prompt, setPrompt] = useState('');
     const [length, setLength] = useState('Medium (15s)');
@@ -67,7 +68,7 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
 
     useEffect(() => {
         fetchUsage();
-    }, [user?.id]);
+    }, [user?.id, usageRefreshTrigger]);
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {

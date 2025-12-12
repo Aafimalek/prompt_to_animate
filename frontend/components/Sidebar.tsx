@@ -22,6 +22,7 @@ interface SidebarProps {
     onDesktopToggle: () => void;
     isLoading?: boolean; // Loading state for history
     onUpgradeClick?: () => void; // Open pricing modal
+    userTier?: string; // User's subscription tier (free, basic, pro)
 }
 
 export function Sidebar({
@@ -34,7 +35,8 @@ export function Sidebar({
     isDesktopCollapsed,
     onDesktopToggle,
     isLoading = false,
-    onUpgradeClick
+    onUpgradeClick,
+    userTier = 'free'
 }: SidebarProps) {
     return (
         <>
@@ -240,21 +242,23 @@ export function Sidebar({
                             "flex flex-col gap-3",
                             isDesktopCollapsed ? "items-center" : ""
                         )}>
-                            {/* Upgrade Button */}
-                            <button
-                                onClick={onUpgradeClick}
-                                className={cn(
-                                    "flex items-center justify-center gap-2 rounded-xl font-medium transition-all duration-200 active:scale-95",
-                                    "bg-gradient-to-r from-orange-500 to-orange-600 text-white",
-                                    "hover:from-orange-600 hover:to-orange-700",
-                                    "shadow-md shadow-orange-500/20",
-                                    isDesktopCollapsed ? "p-3" : "py-2.5 px-4 w-full"
-                                )}
-                                title="Upgrade Plan"
-                            >
-                                <Crown className="w-4 h-4" />
-                                {!isDesktopCollapsed && <span>Upgrade</span>}
-                            </button>
+                            {/* Upgrade Button - hidden for Pro users */}
+                            {userTier !== 'pro' && (
+                                <button
+                                    onClick={onUpgradeClick}
+                                    className={cn(
+                                        "flex items-center justify-center gap-2 rounded-xl font-medium transition-all duration-200 active:scale-95",
+                                        "bg-gradient-to-r from-orange-500 to-orange-600 text-white",
+                                        "hover:from-orange-600 hover:to-orange-700",
+                                        "shadow-md shadow-orange-500/20",
+                                        isDesktopCollapsed ? "p-3" : "py-2.5 px-4 w-full"
+                                    )}
+                                    title="Upgrade Plan"
+                                >
+                                    <Crown className="w-4 h-4" />
+                                    {!isDesktopCollapsed && <span>Upgrade</span>}
+                                </button>
+                            )}
 
                             {/* User Account */}
                             <div className={cn(

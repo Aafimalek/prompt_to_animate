@@ -22,6 +22,26 @@ export default function Home() {
   const [isPricingOpen, setIsPricingOpen] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const [paymentMessage, setPaymentMessage] = useState('Credits added to your account');
+  const [usageRefreshTrigger, setUsageRefreshTrigger] = useState(0);
+  const [userTier, setUserTier] = useState<string>('free');
+
+  // Fetch user tier on mount and when usageRefreshTrigger changes
+  useEffect(() => {
+    const fetchUserTier = async () => {
+      if (isSignedIn && user?.id) {
+        try {
+          const response = await fetch(`${API_BASE_URL}/usage/${user.id}`);
+          if (response.ok) {
+            const data = await response.json();
+            setUserTier(data.tier || 'free');
+          }
+        } catch (error) {
+          console.error('Failed to fetch user tier:', error);
+        }
+      }
+    };
+    fetchUserTier();
+  }, [isSignedIn, user?.id, usageRefreshTrigger]);
 
   // Handle payment success from URL params
   useEffect(() => {
@@ -29,47 +49,22 @@ export default function Home() {
     const paymentId = searchParams.get('payment_id');
 
     if (status === 'succeeded' && paymentId && user?.id) {
-      // Payment was successful - trigger webhook manually for local testing
+      // Payment was successful - show success message
+      // In production, Dodo webhook handles credit updates automatically
       setPaymentSuccess(true);
 
-      // Check if it's a subscription (Pro) or one-time (Basic)
-      // For now, we'll need to determine based on the product
-      // Try to get the last selected product from sessionStorage
+      // Determine message based on product type
       const lastProduct = sessionStorage.getItem('last_selected_product') || 'basic';
-      const isSubscription = lastProduct.includes('pro') || lastProduct.includes('I7R3');
+      const isSubscription = lastProduct.includes('pro');
 
       if (isSubscription) {
-        // Pro subscription
         setPaymentMessage('Pro subscription activated! 🚀');
-        fetch(`${API_BASE_URL}/webhook/payment`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            event_type: 'subscription_active',
-            clerk_id: user.id
-          })
-        }).then(() => {
-          console.log('Pro subscription activated');
-        }).catch(err => {
-          console.error('Failed to activate subscription:', err);
-        });
       } else {
-        // Basic credits
         setPaymentMessage('5 credits added to your account');
-        fetch(`${API_BASE_URL}/webhook/payment`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            event_type: 'payment_succeeded',
-            clerk_id: user.id,
-            product_id: 'basic'
-          })
-        }).then(() => {
-          console.log('Basic credits added');
-        }).catch(err => {
-          console.error('Failed to add credits:', err);
-        });
       }
+
+      // Refresh usage to show updated credits (from webhook)
+      setUsageRefreshTrigger(prev => prev + 1);
 
       // Clear URL params after 5 seconds
       setTimeout(() => {
@@ -199,6 +194,7 @@ export default function Home() {
         onDesktopToggle={() => setIsDesktopCollapsed(!isDesktopCollapsed)}
         isLoading={isLoadingHistory}
         onUpgradeClick={() => setIsPricingOpen(true)}
+        userTier={userTier}
       />
 
       {/* Main Content */}
@@ -213,6 +209,7 @@ export default function Home() {
             initialData={currentChat}
             onGenerateComplete={handleGenerateComplete}
             onUpgradeClick={() => setIsPricingOpen(true)}
+            usageRefreshTrigger={usageRefreshTrigger}
           />
         </div>
       </main>
