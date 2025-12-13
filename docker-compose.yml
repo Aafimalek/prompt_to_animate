@@ -1,0 +1,179 @@
+# =====================================================
+# Docker Compose for Local Development
+# Prompt-to-Animate with Redis + MongoDB
+# =====================================================
+
+version: '3.8'
+
+services:
+  # ==================== Backend API ====================
+  backend-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pta-api
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount source code for hot reloading (read-write for temp files)
+      - ./backend:/app/backend
+      # Persist generated animations
+      - ./generated_animations:/app/generated_animations
+      # Mount env file secrets (keys, etc.)
+      - ./private_key.pem:/app/private_key.pem:ro
+    environment:
+      # Redis connection (internal Docker network)
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      # MongoDB connection (internal Docker network)
+      - MONGODB_URI=mongodb://mongo:27017/prompt_to_animate
+      - MONGODB_DATABASE=prompt_to_animate
+      # These should be set from your .env or secrets
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+      - CLOUDFRONT_DOMAIN=${CLOUDFRONT_DOMAIN}
+      - CLOUDFRONT_KEY_PAIR_ID=${CLOUDFRONT_KEY_PAIR_ID}
+      - CLOUDFRONT_PRIVATE_KEY_PATH=/app/private_key.pem
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - pta-network
+
+  # ==================== Background Worker ====================
+  backend-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pta-worker
+    command: python -m backend.worker
+    volumes:
+      # Mount source code (read-write needed for temp files)
+      - ./backend:/app/backend
+      # Persist generated animations (shared with API)
+      - ./generated_animations:/app/generated_animations
+      # Mount env file secrets
+      - ./private_key.pem:/app/private_key.pem:ro
+    environment:
+      # Redis connection
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      # MongoDB connection
+      - MONGODB_URI=mongodb://mongo:27017/prompt_to_animate
+      - MONGODB_DATABASE=prompt_to_animate
+      # AWS and other secrets
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+      - CLOUDFRONT_DOMAIN=${CLOUDFRONT_DOMAIN}
+      - CLOUDFRONT_KEY_PAIR_ID=${CLOUDFRONT_KEY_PAIR_ID}
+      - CLOUDFRONT_PRIVATE_KEY_PATH=/app/private_key.pem
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    # Scale workers as needed
+    deploy:
+      replicas: 1
+    networks:
+      - pta-network
+
+  # ==================== Redis (Job Queue) ====================
+  redis:
+    image: redis:7-alpine
+    container_name: pta-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pta-network
+
+  # ==================== MongoDB (Database) ====================
+  mongo:
+    image: mongo:7
+    container_name: pta-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: [ "CMD", "mongosh", "--eval", "db.adminCommand('ping')" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pta-network
+
+  # ==================== Redis Commander (Optional UI) ====================
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: pta-redis-ui
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    networks:
+      - pta-network
+    profiles:
+      - debug
+
+# ==================== Volumes ====================
+volumes:
+  redis-data:
+    driver: local
+  mongo-data:
+    driver: local
+
+# ==================== Networks ====================
+networks:
+  pta-network:
+    driver: bridge
+
+# =====================================================
+# Usage:
+#
+# Start all services:
+#   docker-compose up --build
+#
+# Start with Redis Commander UI (debug mode):
+#   docker-compose --profile debug up --build
+#
+# Scale workers:
+#   docker-compose up --scale backend-worker=3
+#
+# View logs:
+#   docker-compose logs -f backend-api
+#   docker-compose logs -f backend-worker
+#
+# Stop:
+#   docker-compose down
+#
+# Stop and remove volumes:
+#   docker-compose down -v
+# =====================================================

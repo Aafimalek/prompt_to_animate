@@ -7,12 +7,17 @@ from contextlib import asynccontextmanager
 from typing import Optional
 from datetime import datetime
 from bson import ObjectId
+from uuid import uuid4
 import os
 import json
 import asyncio
 import uvicorn
-from .llm_service import generate_manim_code
-from .manim_service import execute_manim_code
+
+# Redis and job queue
+from .redis_utils import get_redis_connection, get_queue, get_progress_key, get_result_key
+from .tasks import process_video_generation
+
+# Keep these for non-worker endpoints
 from .s3_service import generate_cloudfront_signed_url
 from .database import connect_to_mongo, close_mongo_connection, get_chats_collection
 from .models import ChatResponse, ChatListResponse
@@ -57,31 +62,61 @@ class AnimationResponse(BaseModel):
 
 @app.post("/generate", response_model=AnimationResponse)
 async def generate_animation(request: AnimationRequest):
-    """Original endpoint - kept for backward compatibility."""
+    """
+    Original endpoint - kept for backward compatibility.
+    Uses the job queue for consistency with the async architecture.
+    """
     print(f"Received request: {request}")
+    
     try:
-        # 1. Generate Code
-        print("Generating Manim code...")
-        code = await generate_manim_code(request.prompt, request.length)
-        print("Code generated.")
+        # Get Redis connection and queue
+        redis_conn = get_redis_connection()
+        queue = get_queue()
         
-        # 2. Execute Manim and upload to S3
-        print("Executing Manim...")
-        from fastapi.concurrency import run_in_threadpool
-        s3_key, local_filename = await run_in_threadpool(execute_manim_code, code)
-        print(f"Video generated: s3_key={s3_key}, local={local_filename}")
+        # Generate unique job ID
+        job_id = str(uuid4())
         
-        # 3. Generate signed URL
-        if s3_key:
-            video_url = generate_cloudfront_signed_url(s3_key)
-            print(f"Generated CloudFront signed URL")
-        else:
-            # Fallback to local URL if S3 upload failed
-            video_url = f"http://localhost:8000/videos/{local_filename}"
-            print(f"Using local fallback URL: {video_url}")
+        # Enqueue the video generation task
+        job = queue.enqueue(
+            process_video_generation,
+            args=(request.prompt, request.length, request.clerk_id or "anonymous", job_id),
+            job_id=job_id,
+            job_timeout=600,
+            result_ttl=3600,
+            failure_ttl=3600
+        )
         
-        return AnimationResponse(video_url=video_url, code=code)
+        print(f"📤 Enqueued job {job_id}")
         
+        # Poll for completion (blocking for this endpoint)
+        max_wait = 600  # 10 minutes
+        poll_interval = 1
+        elapsed = 0
+        
+        while elapsed < max_wait:
+            job.refresh()
+            
+            if job.is_finished:
+                result = job.result
+                if result and result.get("status") == "complete":
+                    return AnimationResponse(
+                        video_url=result.get("video_url", ""),
+                        code=result.get("code", "")
+                    )
+                else:
+                    raise HTTPException(status_code=500, detail="Job completed but no result")
+            
+            if job.is_failed:
+                error_msg = str(job.exc_info) if job.exc_info else "Job failed"
+                raise HTTPException(status_code=500, detail=error_msg)
+            
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+        
+        raise HTTPException(status_code=504, detail="Job timed out")
+        
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -91,8 +126,12 @@ async def generate_animation(request: AnimationRequest):
 async def generate_animation_stream(request: AnimationRequest):
     """
     Streaming endpoint that sends progress updates as Server-Sent Events.
+    
+    This endpoint enqueues the video generation job to Redis and polls
+    for progress updates, streaming them to the frontend. The actual
+    work is done by an RQ worker running in a separate process/container.
+    
     Requires authentication - clerk_id must be provided.
-    Saves chat to MongoDB for authenticated users.
     """
     # Authentication check - require clerk_id
     if not request.clerk_id:
@@ -102,6 +141,9 @@ async def generate_animation_stream(request: AnimationRequest):
         )
     
     async def event_generator():
+        redis_conn = None
+        job = None
+        
         try:
             # Step 0: Check usage limits
             usage_check = await check_can_generate(request.clerk_id)
@@ -109,62 +151,66 @@ async def generate_animation_stream(request: AnimationRequest):
                 yield f"data: {json.dumps({'step': -1, 'status': 'error', 'message': usage_check['reason']})}\n\n"
                 return
             
-            # Step 1: Analyzing prompt
-            yield f"data: {json.dumps({'step': 1, 'status': 'analyzing', 'message': 'Analyzing your prompt...'})}\n\n"
-            await asyncio.sleep(0.5)
+            # Get Redis connection and queue
+            redis_conn = get_redis_connection()
+            queue = get_queue()
             
-            # Step 2: Generating code
-            yield f"data: {json.dumps({'step': 2, 'status': 'generating', 'message': 'Generating Manim code...'})}\n\n"
-            code = await generate_manim_code(request.prompt, request.length)
+            # Generate unique job ID
+            job_id = str(uuid4())
             
-            # Step 3: Code generated
-            yield f"data: {json.dumps({'step': 3, 'status': 'code_ready', 'message': 'Code generated successfully!'})}\n\n"
-            await asyncio.sleep(0.3)
+            # Enqueue the video generation task
+            job = queue.enqueue(
+                process_video_generation,
+                args=(request.prompt, request.length, request.clerk_id, job_id),
+                job_id=job_id,
+                job_timeout=600,  # 10 minute timeout for long videos
+                result_ttl=3600,  # Keep result for 1 hour
+                failure_ttl=3600  # Keep failed job info for 1 hour
+            )
             
-            # Step 4: Rendering
-            yield f"data: {json.dumps({'step': 4, 'status': 'rendering', 'message': 'Rendering animation frames...'})}\n\n"
+            print(f"📤 Enqueued job {job_id} for user {request.clerk_id}")
             
-            from fastapi.concurrency import run_in_threadpool
-            s3_key, local_filename = await run_in_threadpool(execute_manim_code, code)
+            # Poll for progress updates
+            last_step = 0
+            max_polls = 1200  # 10 minutes max (1200 * 0.5s = 600s)
+            poll_count = 0
             
-            # Step 5: Uploading / Finalizing
-            yield f"data: {json.dumps({'step': 5, 'status': 'finalizing', 'message': 'Uploading to cloud storage...'})}\n\n"
-            await asyncio.sleep(0.3)
+            while poll_count < max_polls:
+                poll_count += 1
+                
+                # Check for progress update in Redis
+                progress_key = get_progress_key(job_id)
+                progress_data = redis_conn.get(progress_key)
+                
+                if progress_data:
+                    progress = json.loads(progress_data)
+                    current_step = progress.get("step", 0)
+                    
+                    # Only yield if we have a new step
+                    if current_step != last_step or current_step in [-1, 6]:
+                        yield f"data: {json.dumps(progress)}\n\n"
+                        last_step = current_step
+                        
+                        # Check if job is complete or failed
+                        if current_step == 6 or current_step == -1:
+                            break
+                
+                # Check job status directly
+                job.refresh()
+                if job.is_failed:
+                    error_msg = str(job.exc_info) if job.exc_info else "Job failed unexpectedly"
+                    yield f"data: {json.dumps({'step': -1, 'status': 'error', 'message': error_msg})}\n\n"
+                    break
+                
+                # Wait before next poll
+                await asyncio.sleep(0.5)
             
-            # Step 6: Complete - generate signed URL
-            if s3_key:
-                video_url = generate_cloudfront_signed_url(s3_key)
-            else:
-                # Fallback to local URL if S3 upload failed
-                video_url = f"http://localhost:8000/videos/{local_filename}"
-                s3_key = ""  # Empty string for local fallback
-            
-            # Save to MongoDB if user is authenticated
-            chat_id = None
-            if request.clerk_id:
-                try:
-                    chats_collection = await get_chats_collection()
-                    chat_doc = {
-                        "clerk_id": request.clerk_id,
-                        "prompt": request.prompt,
-                        "length": request.length,
-                        "video_url": video_url,
-                        "s3_key": s3_key or "",
-                        "code": code,
-                        "created_at": datetime.utcnow()
-                    }
-                    result = await chats_collection.insert_one(chat_doc)
-                    chat_id = str(result.inserted_id)
-                    print(f"✅ Chat saved to MongoDB: {chat_id}")
-                except Exception as db_error:
-                    print(f"⚠️ Failed to save chat to MongoDB: {db_error}")
-            
-            # Increment usage count after successful generation
-            await increment_usage(request.clerk_id)
-            
-            yield f"data: {json.dumps({'step': 6, 'status': 'complete', 'message': 'Video ready!', 'video_url': video_url, 'code': code, 'chat_id': chat_id})}\n\n"
-            
+            # Timeout check
+            if poll_count >= max_polls:
+                yield f"data: {json.dumps({'step': -1, 'status': 'error', 'message': 'Job timed out. Please try again.'})}\n\n"
+                
         except Exception as e:
+            print(f"❌ SSE Error: {e}")
             yield f"data: {json.dumps({'step': -1, 'status': 'error', 'message': str(e)})}\n\n"
     
     return StreamingResponse(
@@ -176,6 +222,65 @@ async def generate_animation_stream(request: AnimationRequest):
             "X-Accel-Buffering": "no",
         }
     )
+
+
+# ============== Job Status Endpoint ==============
+
+@app.get("/job/{job_id}/status")
+async def get_job_status(job_id: str):
+    """
+    Get the current status of a video generation job.
+    Useful for polling the job status directly without SSE.
+    """
+    try:
+        redis_conn = get_redis_connection()
+        
+        # Check for progress
+        progress_data = redis_conn.get(get_progress_key(job_id))
+        if progress_data:
+            return json.loads(progress_data)
+        
+        # Check for final result
+        result_data = redis_conn.get(get_result_key(job_id))
+        if result_data:
+            return json.loads(result_data)
+        
+        return {"step": 0, "status": "pending", "message": "Job is queued or not found"}
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============== Health Check Endpoint ==============
+
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint for container orchestration.
+    Returns the status of Redis and MongoDB connections.
+    """
+    health = {"status": "healthy", "services": {}}
+    
+    # Check Redis
+    try:
+        redis_conn = get_redis_connection()
+        redis_conn.ping()
+        health["services"]["redis"] = "connected"
+    except Exception as e:
+        health["services"]["redis"] = f"error: {str(e)}"
+        health["status"] = "degraded"
+    
+    # Check MongoDB
+    try:
+        from .database import get_database
+        db = await get_database()
+        await db.command("ping")
+        health["services"]["mongodb"] = "connected"
+    except Exception as e:
+        health["services"]["mongodb"] = f"error: {str(e)}"
+        health["status"] = "degraded"
+    
+    return health
 
 
 # ============== Chat History Endpoints ==============

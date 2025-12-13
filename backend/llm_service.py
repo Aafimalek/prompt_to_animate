@@ -449,6 +449,28 @@ self.add_fixed_in_frame_mobjects(x_label)
 - `ThreeDAxes()` ✓
 - `Dot3D(point=[1,2,3])` ✓
 
+**CUBE/PRISM SPECIFIC ERRORS (CRITICAL):**
+20. `cube.vertices` ❌ → Does not exist! Use `cube.get_vertices()` ✓
+21. `Cube.vertices` attribute ❌ → Call `cube.get_vertices()` method instead ✓
+22. `prism.vertices` ❌ → Use `prism.get_vertices()` ✓
+
+**CORRECT CUBE PATTERNS:**
+```python
+# Creating a cube
+cube = Cube(side_length=2, color=BLUE, fill_opacity=0.5)
+
+# Getting vertices - MUST use method, NOT attribute
+vertices = cube.get_vertices()  # Returns list of points
+
+# Getting specific corners
+corners = cube.get_vertices()
+top_right = corners[0]  # Access by index
+
+# NEVER use these (they don't exist):
+# cube.vertices ❌
+# cube.vertex ❌
+```
+
 ## ⚠️ CRITICAL: PREVENT OFF-SCREEN ELEMENTS (MANDATORY)
 
 **THE SCREEN BOUNDS ARE ABSOLUTE - NOTHING MAY EXCEED THEM:**

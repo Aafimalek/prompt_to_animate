@@ -14,6 +14,9 @@ Manimancer is a full-stack web application that generates high-quality education
 - [Tech Stack](#-tech-stack)
 - [Project Structure](#-project-structure)
 - [Getting Started](#-getting-started)
+- [Docker Deployment](#-docker-deployment)
+- [Data Persistence](#-data-persistence)
+- [Testing Guide](#-testing-guide)
 - [How It Works](#-how-it-works)
 - [API Reference](#-api-reference)
 - [Configuration](#-configuration)
@@ -61,6 +64,7 @@ Manimancer is a full-stack web application that generates high-quality education
 | **Medium (15s)** | 15-20 seconds | 2-3 step explanations |
 | **Long (1m)** | 55-70 seconds | Detailed tutorials with multiple sections |
 | **Deep Dive (2m+)** | 110-130 seconds | Comprehensive lessons with 6 sections and examples |
+| **Extended (5m)** | 280-320 seconds | University mini-lectures with 8 sections |
 
 ---
 
@@ -76,49 +80,50 @@ flowchart TB
             UI["AnimationGenerator<br/>Component"]
             Sidebar["History Sidebar<br/>+ Upgrade Button"]
             Pricing["PricingModal<br/>(3 Tiers)"]
-            Navbar["Navigation Bar"]
         end
     end
     
-    subgraph Server["⚙️ Backend Server"]
-        subgraph FastAPI["FastAPI Backend (localhost:8000)"]
-            API1["/generate<br/>(Standard POST)"]
-            API2["/generate-stream<br/>(SSE Streaming)"]
+    subgraph Docker["🐳 Docker Compose (pta-network)"]
+        subgraph API["pta-api (Port 8000)"]
+            FastAPI["FastAPI Backend"]
             LLM["llm_service.py"]
             Manim["manim_service.py"]
         end
+        
+        subgraph Worker["pta-worker"]
+            RQ["RQ Worker<br/>(Background Jobs)"]
+        end
+        
+        Redis["pta-redis<br/>(Job Queue)"]
+        Mongo["pta-mongo<br/>(Database)"]
+    end
+    
+    subgraph Volumes["💾 Docker Volumes (Persistent)"]
+        MongoVol["mongo-data"]
+        RedisVol["redis-data"]
     end
     
     subgraph External["☁️ External Services"]
         Groq["Groq LLM API<br/>(Kimi K2 Model)"]
-        ClerkAPI["Clerk API<br/>(Authentication)"]
-        MongoDB["MongoDB Atlas<br/>(Chat Persistence)"]
-    end
-    
-    subgraph Storage["☁️ Cloud Storage (AWS)"]
-        S3["S3 Bucket<br/>(Private)"]
-        CloudFront["CloudFront CDN<br/>(Signed URLs)"]
-    end
-    
-    subgraph LocalStorage["💾 Local Storage (Temp)"]
-        Videos["generated_animations/"]
-        Temp["backend/temp/"]
+        ClerkAPI["Clerk API"]
+        S3["AWS S3 Bucket"]
+        CloudFront["CloudFront CDN"]
     end
     
     Clerk --> ClerkAPI
-    UI -->|"POST /generate-stream"| API2
-    API2 --> LLM
-    LLM -->|"Engineered Prompt"| Groq
-    Groq -->|"Python Code"| LLM
-    LLM --> Manim
-    Manim -->|"Execute manim CLI"| Temp
-    Manim -->|"Output video"| Videos
-    Videos -->|"Upload"| S3
+    UI -->|"POST /generate-stream"| FastAPI
+    FastAPI --> LLM
+    LLM -->|"Prompt"| Groq
+    Groq -->|"Manim Code"| LLM
+    FastAPI -->|"Enqueue Job"| Redis
+    Redis --> RQ
+    RQ --> Manim
+    Manim -->|"Render Video"| S3
     S3 --> CloudFront
-    CloudFront -->|"SSE: signed_url"| UI
-    API2 -->|"Save chat"| MongoDB
-    Sidebar -->|"GET /chats/{clerk_id}"| API1
-    API1 --> MongoDB
+    CloudFront -->|"Signed URL"| UI
+    FastAPI -->|"Save Chat"| Mongo
+    Mongo --> MongoVol
+    Redis --> RedisVol
 ```
 
 ### Request Flow Sequence
@@ -461,6 +466,203 @@ Navigate to **http://localhost:3000** in your browser.
 
 ---
 
+## 🐳 Docker Deployment
+
+The recommended way to run Manimancer locally is using Docker Compose, which handles all dependencies automatically.
+
+### Quick Start
+
+```bash
+# Start all services (API, Worker, Redis, MongoDB)
+docker-compose up -d
+
+# Stop services (data persists)
+docker-compose stop
+
+# Restart services
+docker-compose up -d
+
+# View logs
+docker logs pta-api -f      # API logs
+docker logs pta-worker -f   # Worker logs
+```
+
+### Container Services
+
+| Container | Image | Port | Purpose |
+|:----------|:------|:-----|:--------|
+| `pta-api` | prompt_to_animate-backend-api | 8000 | FastAPI backend server |
+| `pta-worker` | prompt_to_animate-backend-worker | - | RQ worker for video generation |
+| `pta-redis` | redis:7-alpine | 6379 | Job queue and caching |
+| `pta-mongo` | mongo:7 | 27017 | Database persistence |
+
+### Docker Architecture
+
+```mermaid
+flowchart LR
+    subgraph Network["pta-network"]
+        API["pta-api<br/>:8000"]
+        Worker["pta-worker"]
+        Redis["pta-redis<br/>:6379"]
+        Mongo["pta-mongo<br/>:27017"]
+    end
+    
+    subgraph Volumes["Persistent Volumes"]
+        MongoVol["mongo-data"]
+        RedisVol["redis-data"]
+    end
+    
+    API -->|"Enqueue Jobs"| Redis
+    Worker -->|"Process Jobs"| Redis
+    API --> Mongo
+    Mongo --> MongoVol
+    Redis --> RedisVol
+```
+
+### System Dependencies (Installed in Docker)
+
+The Docker image includes all Manim dependencies:
+
+| Package | Version | Purpose |
+|:--------|:--------|:--------|
+| FFmpeg | 7.1.3 | Video encoding |
+| dvisvgm | 3.4.4 | LaTeX to SVG conversion |
+| pdfTeX | TeX Live 2025 | Mathematical equations |
+| manimpango | 0.6.1 | Pango text rendering |
+| Cairo | Latest | Vector graphics |
+
+---
+
+## 💾 Data Persistence
+
+### How Docker Volumes Work
+
+Your data is stored in Docker volumes, which persist on your disk independently of containers.
+
+| Command | Container Status | Volume Status | Data Preserved |
+|:--------|:-----------------|:--------------|:---------------|
+| `docker-compose stop` | Stopped | ✅ Untouched | ✅ **Yes** |
+| `docker-compose down` | Removed | ✅ Untouched | ✅ **Yes** |
+| `docker-compose down -v` | Removed | ❌ **Deleted** | ❌ **No** |
+| Restart PC | Stopped | ✅ Untouched | ✅ **Yes** |
+| Docker Desktop restart | Stopped | ✅ Untouched | ✅ **Yes** |
+
+> ⚠️ **Warning:** Never use `docker-compose down -v` unless you want to delete all user data!
+
+### Volume Locations
+
+| Volume | Purpose | Typical Size |
+|:-------|:--------|:-------------|
+| `prompt_to_animate_mongo-data` | User accounts, chats, credits | ~10-100 MB |
+| `prompt_to_animate_redis-data` | Job queue cache | ~1-10 MB |
+
+### Check Volume Status
+
+```bash
+# List project volumes
+docker volume ls --filter "name=prompt_to_animate"
+
+# Inspect a volume
+docker volume inspect prompt_to_animate_mongo-data
+```
+
+### Data Flow
+
+- **User accounts & credits** → MongoDB → `mongo-data` volume (persistent)
+- **Chat history** → MongoDB → `mongo-data` volume (persistent)
+- **Job queue** → Redis → `redis-data` volume (ephemeral)
+- **Generated videos** → AWS S3 (cloud, not in Docker)
+
+---
+
+## 🧪 Testing Guide
+
+Use this checklist to verify all components are working correctly.
+
+### 1. Backend Health Check
+
+```bash
+curl http://localhost:8000/health
+```
+
+**Expected Response:**
+```json
+{"status":"healthy","services":{"redis":"connected","mongodb":"connected"}}
+```
+
+### 2. Redis Connection
+
+```bash
+docker exec pta-redis redis-cli ping
+```
+
+**Expected:** `PONG`
+
+### 3. MongoDB Connection
+
+```bash
+# Check users collection
+docker exec pta-mongo mongosh prompt_to_animate --eval "db.users.find().pretty()"
+
+# Check chats collection
+docker exec pta-mongo mongosh prompt_to_animate --eval "db.chats.find().pretty()"
+```
+
+### 4. Worker Status
+
+```bash
+docker logs pta-worker --tail 20
+```
+
+Look for: `Worker rq:worker:... started`
+
+### 5. Video Generation Test
+
+| Step | Expected Result |
+|:-----|:----------------|
+| 1. Open http://localhost:3000 | Homepage loads |
+| 2. Sign in with Clerk | Auth modal → redirects to app |
+| 3. Enter: "Show a circle" | Prompt accepted |
+| 4. Select: Medium (15s) | Duration selected |
+| 5. Click Generate | Progress indicators appear |
+| 6. Wait for completion | Video plays in browser |
+
+### 6. Authentication (Clerk)
+
+| Test | How to Verify |
+|:-----|:--------------|
+| Sign Up | Create new account → should redirect to `/` |
+| Sign In | Existing account → should redirect to `/` |
+| Sign Out | Click avatar → Sign out → buttons change |
+| Protected Route | Try generating without sign-in → should be blocked |
+
+### 7. Payment Integration (Dodo)
+
+| Step | Expected Result |
+|:-----|:----------------|
+| 1. Click Upgrade | Pricing modal opens |
+| 2. Select Pro ($20/mo) | Redirected to Dodo checkout |
+| 3. Use test card: `4242 4242 4242 4242` | Payment processes |
+| 4. Return to app | Credits updated |
+
+### 8. Verify Credits in MongoDB
+
+```bash
+docker exec pta-mongo mongosh prompt_to_animate --eval "db.users.find({}, {clerk_id:1, tier:1, basic_credits:1}).pretty()"
+```
+
+### Complete System Verification
+
+```bash
+# All-in-one health check
+echo "=== Container Status ===" && docker-compose ps
+echo "=== API Health ===" && curl -s http://localhost:8000/health
+echo "=== Redis ===" && docker exec pta-redis redis-cli ping
+echo "=== MongoDB ===" && docker exec pta-mongo mongosh --eval "db.adminCommand('ping')"
+```
+
+---
+
 ## ⚙️ How It Works
 
 ### Generation Pipeline
@@ -497,6 +699,7 @@ The `/generate-stream` endpoint sends **6 progress updates** via Server-Sent Eve
 | **Medium (15s)** | 15-20 seconds | 2-3 clear steps, moderate pacing |
 | **Long (1m)** | 55-70 seconds | 4-5 sections, detailed step-by-step |
 | **Deep Dive (2m+)** | 110-130 seconds (min 110s) | 6 full sections with examples, 30+ wait calls |
+| **Extended (5m)** | 280-320 seconds | 8 sections, university mini-lecture, 80+ wait calls |
 
 ---
 
@@ -578,6 +781,75 @@ Get all chats for a specific user (requires Clerk user ID).
 Get a specific chat by ID with a fresh signed URL.
 
 **Response:** Single chat object (same schema as above)
+
+#### `DELETE /chats/{clerk_id}/{chat_id}`
+
+Delete a specific chat. Only the owner (matching clerk_id) can delete their chat.
+
+**Response:**
+```json
+{"message": "Chat deleted successfully"}
+```
+
+#### `GET /job/{job_id}`
+
+Get the current status of a video generation job.
+
+**Response:**
+```json
+{
+  "job_id": "abc123",
+  "status": "finished",
+  "result": {
+    "video_url": "https://cloudfront.../video.mp4",
+    "code": "from manim import *..."
+  }
+}
+```
+
+**Possible status values:** `queued`, `started`, `finished`, `failed`
+
+#### `GET /health`
+
+Health check endpoint for container orchestration.
+
+**Response:**
+```json
+{"status": "healthy", "services": {"redis": "connected", "mongodb": "connected"}}
+```
+
+#### `GET /usage/{clerk_id}`
+
+Get user's current usage and tier info.
+
+**Response:**
+```json
+{
+  "tier": "pro",
+  "basic_credits": 100,
+  "monthly_count": 5,
+  "monthly_limit": 50,
+  "can_generate": true
+}
+```
+
+#### `POST /webhook/payment`
+
+Handle payment webhook from Dodo Payments.
+
+**Request Body:**
+```json
+{
+  "event_type": "payment_succeeded",
+  "clerk_id": "user_abc123",
+  "product_id": "pdt_9pgk0uVBWpT13GL0Mfqbc"
+}
+```
+
+**Response:**
+```json
+{"status": "success", "message": "Credits added"}
+```
 
 #### `GET /videos/{filename}`
 
@@ -871,12 +1143,16 @@ This project is open-source and available under the [MIT License](LICENSE).
 
 | Update | Description |
 |:-------|:------------|
+| **🐳 Docker Compose** | Full containerized deployment with pta-api, pta-worker, pta-redis, pta-mongo |
+| **💾 Data Persistence Docs** | Clear documentation on volume persistence and commands |
+| **🧪 Testing Guide** | 8-step verification checklist for all components |
+| **📊 Extended (5m)** | New 5-minute duration for university mini-lectures |
+| **🔧 Cube.vertices Fix** | Fixed `Cube.vertices` error (use `get_vertices()` method) |
 | **3Blue1Brown Style** | Enhanced prompt engineering for professional-quality animations |
 | **Error Prevention** | Added 20+ API error prevention rules (Arrow3D, VGroup, Syntax errors) |
 | **Off-Screen Prevention** | Stricter bounds checking (±5.5 x ±3.0) to keep all elements visible |
 | **Overlap Prevention** | Rule: Never show text and diagrams simultaneously |
 | **Suspense Boundary** | Fixed Vercel build error with `useSearchParams()` |
-| **Social Links** | Added GitHub and X/Twitter links to footer |
 
 ---
 
