@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Sidebar, HistoryItem } from '@/components/Sidebar';
 import { Navbar } from '@/components/Navbar';
@@ -11,7 +11,8 @@ import { cn } from '@/lib/utils';
 import { useUser } from '@clerk/nextjs';
 import { getUserChats, deleteChat, Chat, API_BASE_URL } from '@/lib/api';
 
-export default function Home() {
+// Wrapper component to handle Suspense boundary for useSearchParams
+function HomeContent() {
   const { user, isSignedIn, isLoaded } = useUser();
   const searchParams = useSearchParams();
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -236,5 +237,18 @@ export default function Home() {
         </div>
       )}
     </div>
+  );
+}
+
+// Default export with Suspense boundary for useSearchParams
+export default function Home() {
+  return (
+    <Suspense fallback={
+      <div className="flex h-screen items-center justify-center bg-background">
+        <div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full" />
+      </div>
+    }>
+      <HomeContent />
+    </Suspense>
   );
 }
