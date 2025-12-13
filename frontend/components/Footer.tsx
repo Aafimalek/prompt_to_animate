@@ -38,10 +38,10 @@ export function Footer({ isDesktopCollapsed = true }: FooterProps) {
 
                 {/* Social Icons */}
                 <div className="flex items-center space-x-1">
-                    <a href="#" className="p-1.5 text-zinc-500 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-all">
+                    <a href="https://github.com/Aafimalek" target="_blank" rel="noopener noreferrer" className="p-1.5 text-zinc-500 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-all">
                         <Github className="w-4 h-4" />
                     </a>
-                    <a href="#" className="p-1.5 text-zinc-500 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-all">
+                    <a href="https://x.com/aafimalek2032" target="_blank" rel="noopener noreferrer" className="p-1.5 text-zinc-500 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-all">
                         <Twitter className="w-4 h-4" />
                     </a>
                 </div>

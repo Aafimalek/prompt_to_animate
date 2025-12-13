@@ -865,6 +865,21 @@ This project is open-source and available under the [MIT License](LICENSE).
 
 ---
 
+## 🚀 Recent Updates
+
+### December 2024
+
+| Update | Description |
+|:-------|:------------|
+| **3Blue1Brown Style** | Enhanced prompt engineering for professional-quality animations |
+| **Error Prevention** | Added 20+ API error prevention rules (Arrow3D, VGroup, Syntax errors) |
+| **Off-Screen Prevention** | Stricter bounds checking (±5.5 x ±3.0) to keep all elements visible |
+| **Overlap Prevention** | Rule: Never show text and diagrams simultaneously |
+| **Suspense Boundary** | Fixed Vercel build error with `useSearchParams()` |
+| **Social Links** | Added GitHub and X/Twitter links to footer |
+
+---
+
 ## 🙏 Acknowledgements
 
 - [Manim Community](https://www.manim.community/) — The incredible animation engine
@@ -873,6 +888,15 @@ This project is open-source and available under the [MIT License](LICENSE).
 - [Clerk](https://clerk.com/) — Developer-first authentication
 - [Next.js](https://nextjs.org/) — React framework
 - [TailwindCSS](https://tailwindcss.com/) — Styling framework
+
+---
+
+## 👤 Author
+
+**Aafi Malek**
+
+- GitHub: [@Aafimalek](https://github.com/Aafimalek)
+- X/Twitter: [@aafimalek2032](https://x.com/aafimalek2032)
 
 ---
 
@@ -885,3 +909,4 @@ This project is open-source and available under the [MIT License](LICENSE).
   <a href="https://github.com/Aafimalek/prompt_to_animate/issues">🐛 Report Bug</a> •
   <a href="https://github.com/Aafimalek/prompt_to_animate/issues">✨ Request Feature</a>
 </p>
+

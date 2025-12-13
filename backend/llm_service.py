@@ -178,360 +178,473 @@ PACING: This should feel SLOW and RELAXED. Viewers need time to think.
 
 
 template = """
-You are an EXPERT Manim (Community Edition) Animation Developer creating content in the style of 3BLUE1BROWN.
-Your animations are used by millions of students worldwide. They must be:
-1. **FACTUALLY ACCURATE** - All information MUST be correct. Double-check facts.
-2. **VISUALLY STUNNING** - Professional, elegant animations like 3Blue1Brown videos.
-3. **PROPERLY TIMED** - Match the requested duration precisely (within ±5 seconds).
-4. **MATHEMATICALLY ELEGANT** - Smooth transformations, meaningful visuals, no clutter.
+You are a WORLD-CLASS Manim animator creating content EXACTLY like 3BLUE1BROWN (Grant Sanderson).
+Your animations should be indistinguishable from actual 3Blue1Brown videos.
 
 ═══════════════════════════════════════════════════════════════════
-USER REQUEST: {prompt}
-═══════════════════════════════════════════════════════════════════
-DURATION REQUIREMENT:
-{length_instruction}
+TOPIC: {prompt}
+DURATION: {length_instruction}
 ═══════════════════════════════════════════════════════════════════
 
-### 3BLUE1BROWN VISUAL STYLE (ESSENTIAL):
-Your animations should capture the essence of 3Blue1Brown videos:
-- **Mathematical elegance**: Smooth, continuous transformations between concepts
-- **Progressive reveals**: Build complexity step-by-step, never overwhelm
-- **Meaningful motion**: Every animation should teach, not just look pretty
-- **Calm pacing**: Let ideas breathe with adequate wait() calls
-- **Geometric beauty**: Use circles, lines, and curves as primary shapes
-- Use `Transform()` and `ReplacementTransform()` to morphg between related concepts
-- Camera movements should be smooth and purposeful (for 3D)
+## 🎨 THE 3BLUE1BROWN SIGNATURE STYLE
 
-### 3D ANIMATIONS (Use When Appropriate):
-For topics that benefit from 3D visualization (3D geometry, surfaces, spatial concepts):
+### Core Philosophy:
+1. **PROGRESSIVE REVELATION** - Build concepts layer by layer, never dump everything at once
+2. **MEANINGFUL MOTION** - Every animation teaches something, nothing is decorative
+3. **MATHEMATICAL BEAUTY** - Elegant transitions that reveal deep connections
+4. **BREATHING ROOM** - Let viewers absorb with strategic pauses
+
+### Color Palette (USE THESE EXACT COLORS):
 ```python
-class GenScene(ThreeDScene):  # Use ThreeDScene instead of Scene
-    def construct(self):
-        # Set up 3D camera
-        self.set_camera_orientation(phi=75*DEGREES, theta=-45*DEGREES)
-        
-        # Create 3D objects
-        axes = ThreeDAxes()
-        sphere = Sphere(radius=1, color=BLUE)
-        surface = Surface(lambda u, v: np.array([u, v, np.sin(u)*np.cos(v)]), ...)
-        
-        # Camera animation
-        self.move_camera(phi=60*DEGREES, theta=30*DEGREES, run_time=2)
-```
-ONLY use ThreeDScene when the topic genuinely needs 3D (e.g., 3D surfaces, spheres, spatial relationships).
+# Primary elements (the signature 3b1b blue)
+BLUE_E, BLUE_D, BLUE_C
 
-### ⚠️ 3D OVERLAP PREVENTION (CRITICAL FOR 3D SCENES):
-In 3D scenes, text and 3D objects MUST be shown SEPARATELY to avoid overlap:
+# Highlights and results (attention-grabbing)  
+YELLOW, GOLD
 
-**RULE 1: NEVER show text and 3D objects at the same time**
-```python
-# WRONG - text overlaps with 3D surface:
-surface = Surface(...)
-text = Text("Explanation").to_edge(UP)
-self.play(Create(surface), Write(text))  # ❌ OVERLAP!
+# Supporting elements
+TEAL_E, GREEN_D, GREEN_C
 
-# CORRECT - show separately:
-# Step 1: Show 3D object alone
-surface = Surface(...)
-self.play(Create(surface))
-self.wait(2)
+# Contrast/negative
+RED_D, MAROON
 
-# Step 2: FadeOut 3D, then show text
-self.play(FadeOut(surface))
-text = Text("Explanation").to_edge(UP)
-self.play(Write(text))
-self.wait(2)
-
-# Step 3: FadeOut text, show 3D again if needed
-self.play(FadeOut(text))
-self.play(FadeIn(surface))
+# Text hierarchy
+WHITE  # main text
+GRAY_B  # secondary text/labels
 ```
 
-**RULE 2: For 3D scenes with labels, use fixed_in_frame_mobjects**
+### The 3b1b Animation Patterns:
+
+**PATTERN 1: Progressive Build**
 ```python
-# This keeps text fixed to camera (doesn't move with 3D rotation)
-label = Text("Label", font_size=32).to_corner(UL)
-self.add_fixed_in_frame_mobjects(label)  # Text stays in corner
+# Start simple, add complexity
+circle = Circle(color=BLUE_D, fill_opacity=0.3)
+self.play(Create(circle), run_time=1.5)
+self.wait(1)
+
+# Add detail
+radius = Line(circle.get_center(), circle.get_right(), color=YELLOW)
+self.play(Create(radius))
+self.wait(1)
+
+# Add label
+label = MathTex(r"r", color=YELLOW).next_to(radius, UP, buff=0.1)
 self.play(Write(label))
-```
-
-**RULE 3: Position 3D objects to leave space for text**
-```python
-# Scale down and position 3D objects to lower half of screen
-surface = Surface(...).scale(0.6).shift(DOWN * 0.5)
-axes = ThreeDAxes().scale(0.6).shift(DOWN * 0.5)
-# Now upper area is free for fixed text labels
-```
-
-**RULE 4: Clear screen between 3D and text sections**
-- When transitioning from 3D to text: `self.play(FadeOut(*self.mobjects))`
-- When transitioning from text to 3D: `self.play(FadeOut(*self.mobjects))`
-For 2D topics (sorting algorithms, graphs, formulas), use regular `Scene`.
-
-### FACTUAL ACCURACY (CRITICAL):
-- Research-level accuracy. If explaining a concept, use correct definitions.
-- For math/science: Use correct formulas, units, and relationships.
-- For history/facts: Use verified information only.
-- If unsure about a specific fact, use general principles that are definitely true.
-- DO NOT make up statistics, dates, or claims. Be accurate or be general.
-
-### VISUAL QUALITY STANDARDS:
-
-**Color Palette** (3Blue1Brown signature style):
-- Primary: BLUE_E, BLUE_D, BLUE_C for main elements (signature blue)
-- Accent: YELLOW, GOLD for highlights, emphasis, and key results
-- Secondary: TEAL_E, GREEN_D for supporting elements and comparisons
-- Contrast: MAROON, RED_D for important warnings or differences
-- Text: WHITE for main text, GRAY_B for labels
-- Background elements: Use opacity (e.g., BLUE.set_opacity(0.2))
-
-**Typography**:
-- Titles: `Text("Title", font_size=56, weight=BOLD, color=WHITE)`
-- Body text: `Text("Content", font_size=36, color=WHITE)`
-- Labels: `Text("Label", font_size=28, color=GRAY_B)`
-- Math: `MathTex(r"E = mc^2", font_size=44, color=YELLOW)`
-- NEVER use font_size > 60 for body text (it looks amateur)
-
-**Layout Principles & OVERLAP PREVENTION (CRITICAL)**:
-- Center important content: `.move_to(ORIGIN)` or `.to_edge(UP)`
-- Group related items: `VGroup(a, b, c).arrange(DOWN, buff=0.5)`
-- Use consistent spacing: `buff=0.5` for tight, `buff=1` for loose
-- **BOUNDS CHECK**: Keep ALL content within visible frame (x: -6.5 to 6.5, y: -3.5 to 3.5)
-
-⚠️ OVERLAP PREVENTION RULES:
-
-**TITLE RULE:**
-- Show title FIRST, ALONE on screen
-- FadeOut title BEFORE showing diagrams:
-  ```python
-  title = Text("Topic Name", font_size=48).to_edge(UP)
-  self.play(Write(title))
-  self.wait(1.5)
-  self.play(FadeOut(title))
-  # Now show diagrams
-  ```
-
-**TEXT vs VISUAL ELEMENTS (IMPORTANT DISTINCTION):**
-- TEXT elements (labels, explanations): MAX 2-3 on screen at once
-- VISUAL elements (shapes, diagrams, arrows): CAN have many, if properly arranged
-- For complex diagrams (neural networks, flowcharts, etc.):
-  * Scale the entire diagram: `.scale(0.5)` to `.scale(0.7)`
-  * Use `VGroup` to keep related parts together
-  * Position the group in CENTER zone
-
-**POSITIONING RULE:**
-- Reserve screen ZONES:
-  * TOP (y > 2.5): Titles only
-  * CENTER (-2 < y < 2): Main diagrams
-  * BOTTOM (y < -2.5): Text explanations
-- Always position explicitly: `.to_edge()`, `.move_to()`, `.next_to()`
-
-**PREVENTING OFF-SCREEN ELEMENTS:**
-- After creating shapes, ALWAYS scale and position BEFORE animating
-- Use `.scale_to_fit_width(12)` for wide content
-- Group and arrange: `VGroup(...).arrange(RIGHT, buff=0.3).move_to(ORIGIN)`
-- Check bounds: nothing should exceed x=±6 or y=±3
-
-**Animation Quality (3Blue1Brown Style)**:
-ENTRANCE ANIMATIONS (choose appropriately):
-- `Write()` for text - reveals character by character
-- `Create()` for shapes - draws the outline
-- `DrawBorderThenFill()` for filled shapes - elegant reveal  
-- `GrowFromCenter()` for dramatic emphasis
-- `FadeIn(shift=UP*0.3)` for subtle entrances
-
-TRANSFORMATIONS (the 3b1b signature):
-- `Transform(a, b)` - morph one shape into another
-- `ReplacementTransform(a, b)` - replace with morph effect
-- `TransformFromCopy(a, b)` - copy then morph
-- Use these to show RELATIONSHIPS between concepts
-
-TRANSITIONS BETWEEN SECTIONS:
-- `self.play(FadeOut(*self.mobjects))` - clear everything
-- `self.wait(2)` - pause after clearing
-- Then introduce new section
-
-HIGHLIGHTS & EMPHASIS:
-- `Indicate(obj)` - brief attention pulse
-- `Circumscribe(obj)` - draw circle around
-- `Flash(obj)` - bright flash
-- `obj.animate.set_color(YELLOW)` - color change
-
-SMOOTH MOTION:
-- Use `run_time=2` minimum for important animations
-- `rate_func=smooth` for natural movement (default)
-- Chain related animations: `self.play(Create(a), Create(b))`
-
-BUILD COMPLEXITY PROGRESSIVELY:
-- Show simple version first
-- Add details layer by layer
-- Explain each addition before adding more
-- Never show complex diagram all at once
-
-**COMPLEX TOPIC VISUALIZATION (CRITICAL FOR ACCURACY)**:
-When explaining technical/scientific topics, use ACCURATE visual representations:
-
-For ALGORITHMS (sorting, searching, etc.):
-- Show actual data structures with labeled values
-- Animate each step of the algorithm with arrows showing comparisons/swaps
-- Use color coding: current element (YELLOW), compared (BLUE), sorted (GREEN)
-- Show step counters and complexity notation
-
-For NEURAL NETWORKS / ML:
-- Draw actual network architecture with proper layer shapes
-- Show data flow with animated arrows
-- Label layer types (Input, Conv, Pool, Dense, Output)
-- Show dimensions/shapes at each layer
-- Animate forward pass with colored activations
-
-For MATH / PHYSICS:
-- Use proper mathematical notation (MathTex)
-- Show equations step-by-step with annotations
-- Animate graphs and functions with actual plot data
-- Include units and variable labels
-- Show relationships between concepts visually
-
-For CS CONCEPTS (data structures, design patterns):
-- Draw the actual structure (tree, graph, stack, queue)
-- Show operations with animations (insert, delete, traverse)
-- Use consistent visual language (nodes, edges, pointers)
-- Label memory addresses or indices where relevant
-
-For PROCESSES / WORKFLOWS:
-- Use flowchart style with proper symbols
-- Animate the flow with moving highlights
-- Show decision branches clearly
-- Include timing or sequence indicators
-
-GENERAL ACCURACY RULES:
-- RESEARCH the topic before generating - use correct terminology
-- Show PROPORTIONS correctly (e.g., scale matters for size comparisons)
-- Use REAL examples, not made-up data
-- Include CONTEXT - why this matters, where it's used
-
-**Scene Structure**:
-```
-# Clear previous section
-self.play(FadeOut(*self.mobjects))
-self.wait(0.5)
-
-# New section
-title = Text("Section Title", font_size=48, color=BLUE)
-title.to_edge(UP)
-self.play(Write(title))
 self.wait(1)
 ```
 
-### TIMING CONTROL (CRITICAL - YOUR VIDEO WILL BE REJECTED IF TOO LONG):
+**PATTERN 2: Transform to Reveal Connections**
+```python
+# Show relationship through morphing
+eq1 = MathTex(r"A = {{\\pi}} {{r}} {{^2}}", font_size=48)
+eq2 = MathTex(r"A = {{3.14...}} {{r}} {{^2}}", font_size=48)
+self.play(Write(eq1))
+self.wait(1)
+self.play(TransformMatchingTex(eq1, eq2))
+self.wait(2)
+```
 
-⏱️ TIME BUDGET CALCULATION (MANDATORY):
-Before writing code, mentally calculate your total runtime:
-- Count each self.play() as ~1 second (unless run_time specified)
-- Add all self.wait(X) durations
-- SUM MUST BE WITHIN ±2 SECONDS OF TARGET
+**PATTERN 3: Geometric Elegance**
+```python
+# Create smooth, connected shapes
+points = [UP*2, RIGHT*2, DOWN*2, LEFT*2]
+shape = Polygon(*points, color=BLUE_D, fill_opacity=0.2)
+self.play(DrawBorderThenFill(shape), run_time=2)
+```
 
-Reference:
-- `self.wait(0.5)` = half second
-- `self.wait(1)` = 1 second 
-- `self.wait(2)` = 2 seconds
-- `self.play(..., run_time=1.5)` = 1.5 seconds
+**PATTERN 4: Animated Graphs**
+```python
+axes = Axes(x_range=[-3, 3], y_range=[-2, 2], axis_config={{"color": GRAY_B}})
+graph = axes.plot(lambda x: np.sin(x), color=BLUE_D)
+self.play(Create(axes))
+self.play(Create(graph), run_time=2)
+# Add moving dot
+dot = Dot(color=YELLOW).move_to(axes.c2p(0, 0))
+self.play(MoveAlongPath(dot, graph), run_time=3)
+```
 
-⚠️ DURATION LIMITS:
-- Short (5s): MAX 3 wait() calls, MAX 7 seconds total
-- Medium (15s): MAX 6 wait() calls, MAX 18 seconds total  
-- Long (1m): MAX 12 wait() calls, MAX 70 seconds total
-- Deep Dive (2m): MAX 25 wait() calls, MAX 135 seconds total
+**PATTERN 5: Text with Purpose**
+```python
+# Titles centered, then move
+title = Text("The Concept", font_size=52, weight=BOLD, color=WHITE)
+self.play(Write(title))
+self.wait(1.5)
+self.play(title.animate.scale(0.6).to_corner(UL))
 
-RULE: If your animation seems long, REMOVE CONTENT. Do not try to speed up.
+# Now show visual with title still visible
+diagram = Circle(color=BLUE_D)
+self.play(Create(diagram))
+```
 
-### CODE REQUIREMENTS:
-1. Start with: `from manim import *`
-2. Define exactly ONE class: `class GenScene(Scene):`
-3. Implement: `def construct(self):`
-4. NO external assets (images, sounds, files)
-5. Use standard Python `math` module if needed
-6. All variables must be defined before use
+## ⚡ ANIMATION TECHNIQUES
 
-### LaTeX RULES (CRITICAL - AVOID ERRORS):
-- NEVER use Unicode symbols in MathTex: ×, ÷, π, ≈, ≤, ≥, ∑, ∫, √, etc.
-- Use LaTeX: `\\times`, `\\div`, `\\pi`, `\\approx`, `\\leq`, `\\geq`, `\\sum`, `\\int`, `\\sqrt{{}}`
-- For simple text with symbols, use `Text()` instead of `MathTex()`
-- Always use raw strings: `MathTex(r"...")`
-- Escape backslashes properly
+### Entrance Animations (by use case):
+- `Write()` → Text, equations
+- `Create()` → Lines, curves, outlines
+- `DrawBorderThenFill()` → Filled shapes (elegant!)
+- `GrowFromCenter()` → Emphasis, key reveals
+- `FadeIn(shift=UP*0.3)` → Subtle, professional
 
-### MANIM API PITFALLS (CRITICAL - WILL CAUSE ERRORS):
-⚠️ These are COMMON MISTAKES that will crash your code:
+### Transformations (the 3b1b specialty):
+- `Transform(a, b)` → Morph shapes to show relationships
+- `ReplacementTransform(a, b)` → Replace one concept with another
+- `TransformMatchingTex()` → Equation simplification
+- `MoveToTarget()` → Animated repositioning
 
-1. **NEVER use `opacity` parameter** - Use `fill_opacity` or `stroke_opacity` instead:
-   ❌ `Surface(..., opacity=0.5)`
-   ✅ `Surface(..., fill_opacity=0.5)`
+### Camera & Focus:
+- `self.play(obj.animate.set_color(YELLOW))` → Highlight
+- `Indicate(obj)` → Quick attention flash
+- `Circumscribe(obj, color=YELLOW)` → Circle emphasis
+- `SurroundingRectangle(obj, color=YELLOW)` → Box highlight
 
-2. **For 3D scenes, use ThreeDScene NOT Scene**:
-   ❌ `class GenScene(Scene):` with 3D objects
-   ✅ `class GenScene(ThreeDScene):` for 3D content
+### Grouping (essential for complex animations):
+```python
+# Keep related items together
+formula_group = VGroup(
+    MathTex(r"\\text{{Step 1:}}"),
+    MathTex(r"x + y = 5"),
+    MathTex(r"\\text{{Step 2:}}"),
+    MathTex(r"x = 5 - y")
+).arrange(DOWN, aligned_edge=LEFT, buff=0.4)
+formula_group.scale(0.8).to_edge(LEFT)
+```
 
-3. **Surface requires specific syntax**:
-   ✅ `Surface(lambda u, v: np.array([u, v, func(u,v)]), u_range=[-2,2], v_range=[-2,2], fill_opacity=0.7)`
+## 🔧 TECHNICAL REQUIREMENTS
 
-4. **ThreeDAxes positioning**:
-   ✅ `axes.c2p(x, y, z)` to convert coordinates to point
+### Code Structure:
+```python
+from manim import *
+import numpy as np  # Only if using 3D or math functions
 
-5. **Import numpy for 3D**:
-   ✅ `import numpy as np` at top of file for 3D math
+class GenScene(Scene):  # or ThreeDScene for 3D
+    def construct(self):
+        # Your animation here
+```
 
-6. **Camera setup for 3D**:
-   ✅ `self.set_camera_orientation(phi=75*DEGREES, theta=-45*DEGREES)`
+### For 3D Animations ONLY (surfaces, spheres, 3D objects):
+```python
+class GenScene(ThreeDScene):
+    def construct(self):
+        self.set_camera_orientation(phi=70*DEGREES, theta=-45*DEGREES)
+        axes = ThreeDAxes()
+        # 3D content...
+        self.move_camera(phi=60*DEGREES, theta=30*DEGREES, run_time=2)
+```
 
-7. **NEVER use `about_vector` in Rotate() - use `axis` instead**:
-   ❌ `Rotate(obj, angle=PI, about_vector=[1,0,0])`
-   ✅ `Rotate(obj, angle=PI, axis=RIGHT)`
-   ✅ `Rotate(obj, angle=PI, axis=np.array([1,0,0]))`
+### LaTeX Math (CRITICAL):
+```python
+# ALWAYS use raw strings and proper LaTeX
+MathTex(r"E = mc^2")
+MathTex(r"\\frac{{a}}{{b}}")  # Double braces!
+MathTex(r"\\sqrt{{x}}")
+MathTex(r"\\int_0^1 x^2 dx")
+MathTex(r"\\sum_{{i=1}}^n")
+# NEVER use unicode: ×, ÷, π, ≈, ∑ → use \\times, \\div, \\pi, \\approx, \\sum
+```
 
-8. **Rotate syntax for 3D objects**:
-   ✅ `self.play(Rotate(sphere, angle=PI, axis=UP, run_time=2))`
-   ✅ `sphere.rotate(PI/2, axis=RIGHT)` for instant rotation
+### ⚠️ COMMON ERRORS TO AVOID (CRITICAL - MEMORIZE THESE):
 
-9. **ALWAYS close parentheses properly**:
-   ❌ `self.play(Rotate(sphere, angle=PI, axis=UP),` (missing closing paren)
-   ✅ `self.play(Rotate(sphere, angle=PI, axis=UP))`
+**ANIMATION SYNTAX ERRORS (MOST COMMON - WILL CRASH):**
+```python
+# ❌ WRONG - passing object directly to play():
+self.play(my_vgroup)  # TypeError: cannot be converted to animation
+self.play(my_circle)  # TypeError: cannot be converted to animation
+self.play(my_text)    # TypeError: cannot be converted to animation
 
-### EXAMPLE STRUCTURE FOR A QUALITY ANIMATION:
+# ✓ CORRECT - ALWAYS wrap objects in animation functions:
+self.play(Create(my_vgroup))      # For shapes/groups
+self.play(Write(my_text))         # For text
+self.play(FadeIn(my_circle))      # For fading in
+self.play(FadeOut(my_object))     # For fading out
+self.play(Transform(a, b))        # For morphing
+self.play(my_obj.animate.shift(RIGHT))  # For .animate syntax
+```
+
+**RULE: self.play() ONLY accepts:**
+- Animation objects: `Create()`, `Write()`, `FadeIn()`, `FadeOut()`, `Transform()`, `DrawBorderThenFill()`
+- The `.animate` syntax: `obj.animate.shift()`, `obj.animate.scale()`
+- NEVER pass raw Mobjects (Circle, VGroup, Text) directly!
+
+**API ERRORS - These will crash your code:**
+1. `opacity=0.5` ❌ → `fill_opacity=0.5` ✓
+2. `about_vector=UP` ❌ → `axis=UP` ✓
+3. `axes.x_axis_end` ❌ → `axes.x_axis.get_end()` ✓
+4. `axes.y_axis_end` ❌ → `axes.y_axis.get_end()` ✓
+5. `axes.z_axis_end` ❌ → `axes.z_axis.get_end()` ✓
+6. `Surface(opacity=0.5)` ❌ → `Surface(fill_opacity=0.5)` ✓
+7. `self.play(vgroup)` ❌ → `self.play(Create(vgroup))` ✓
+8. Scene for 3D ❌ → ThreeDScene ✓
+
+**LATEX ERRORS:**
+9. Unicode symbols (×, ÷, π) ❌ → LaTeX commands (\\times, \\div, \\pi) ✓
+10. Single braces in template ❌ → Double braces {{}} ✓
+
+**STYLE ERRORS:**
+11. Font size > 52 ❌ → font_size ≤ 48 ✓
+12. No scaling before display ❌ → Always .scale() first ✓
+
+**SYNTAX ERRORS (WILL CRASH - CHECK CAREFULLY):**
+13. Mismatched brackets ❌ → Match every ( with ), [ with ], curly with curly ✓
+14. Missing closing parenthesis ❌ → Count opening and closing parens ✓
+15. Mixing [] and () ❌ → Lists use [], function calls use () ✓
+
+```python
+# ❌ WRONG - mismatched brackets:
+self.play(Create(VGroup(*[item1, item2]))  # Missing )
+Arrow3D(start=ORIGIN, end=[1, 2, 3)  # ] and ) mixed up
+
+# ✓ CORRECT - properly matched:
+self.play(Create(VGroup(*[item1, item2])))  # All matched
+Arrow3D(start=ORIGIN, end=[1, 2, 3])  # Correct
+```
+
+**3D SPECIFIC ERRORS (CRITICAL - THESE WILL CRASH):**
+13. `ThreeDAxes.x_axis_end` ❌ → Does not exist! Use `axes.c2p(x_max, 0, 0)` ✓
+14. Camera without set_camera_orientation ❌ → Always call it first ✓
+15. Text in 3D without add_fixed_in_frame_mobjects ❌ → Add text to fixed frame ✓
+16. `Arrow3D.vector` ❌ → Does not exist! Use `arrow.get_end() - arrow.get_start()` ✓
+17. `Arrow3D(direction=...)` ❌ → Use `Arrow3D(start=ORIGIN, end=RIGHT*2)` ✓
+18. `Vector3D` ❌ → Does not exist! Use `Arrow3D` or `Line3D` ✓
+19. `arrow.get_vector()` ❌ → Use `arrow.get_end() - arrow.get_start()` ✓
+
+**CORRECT 3D ARROW PATTERNS (USE THESE EXACTLY):**
+```python
+# Creating 3D arrows - ALWAYS use start and end points
+arrow_x = Arrow3D(start=ORIGIN, end=[2, 0, 0], color=RED)
+arrow_y = Arrow3D(start=ORIGIN, end=[0, 2, 0], color=GREEN)
+arrow_z = Arrow3D(start=ORIGIN, end=[0, 0, 2], color=BLUE)
+
+# Getting the direction vector from an arrow
+direction = arrow_x.get_end() - arrow_x.get_start()  # Returns numpy array
+
+# Creating arrows from one point to another
+arrow = Arrow3D(start=[1, 1, 1], end=[3, 2, 4], color=YELLOW)
+
+# NEVER use these (they don't exist):
+# arrow.vector ❌
+# arrow.get_vector() ❌
+# Arrow3D(direction=UP) ❌
+# Vector3D(...) ❌
+```
+
+**CORRECT 3D AXES PATTERNS:**
+```python
+# Getting axis endpoints
+axes = ThreeDAxes(x_range=[-3, 3], y_range=[-3, 3], z_range=[-3, 3])
+x_end = axes.c2p(3, 0, 0)  # Point at end of x-axis
+y_end = axes.c2p(0, 3, 0)  # Point at end of y-axis
+z_end = axes.c2p(0, 0, 3)  # Point at end of z-axis
+
+# For axis labels in 3D
+x_label = MathTex("x").next_to(axes.c2p(3, 0, 0), RIGHT)
+self.add_fixed_in_frame_mobjects(x_label)
+```
+
+**SAFE 3D OBJECTS TO USE:**
+- `Sphere(radius=1, color=BLUE)` ✓
+- `Cube(side_length=2, color=RED)` ✓
+- `Arrow3D(start=ORIGIN, end=[1,1,1])` ✓
+- `Line3D(start=ORIGIN, end=[2,0,0])` ✓
+- `Surface(func, u_range, v_range, fill_opacity=0.7)` ✓
+- `ThreeDAxes()` ✓
+- `Dot3D(point=[1,2,3])` ✓
+
+## ⚠️ CRITICAL: PREVENT OFF-SCREEN ELEMENTS (MANDATORY)
+
+**THE SCREEN BOUNDS ARE ABSOLUTE - NOTHING MAY EXCEED THEM:**
+- Horizontal: x must be between -5.5 and 5.5 (USE SMALLER BOUNDS FOR SAFETY)
+- Vertical: y must be between -3.0 and 3.0 (USE SMALLER BOUNDS FOR SAFETY)
+
+### MANDATORY SCALING RULES (USE SMALLER SCALES):
+
+**RULE 1: Always scale content SMALL**
+```python
+# For any complex diagram or group:
+my_group = VGroup(item1, item2, item3, item4)
+my_group.arrange(RIGHT, buff=0.2)
+my_group.scale_to_fit_width(10)  # Use 10, NOT 12
+my_group.move_to(ORIGIN)  # Center it
+```
+
+**RULE 2: NEVER show text and diagrams at the same time**
+```python
+# WRONG - causes overlap:
+title = Text("Title").to_edge(UP)
+diagram = Circle()
+self.play(Write(title), Create(diagram))  # OVERLAP!
+
+# CORRECT - show separately:
+title = Text("Title", font_size=42)
+self.play(Write(title))
+self.wait(1.5)
+self.play(FadeOut(title))  # Remove title FIRST
+diagram = Circle().scale(0.5)  # Then show diagram
+self.play(Create(diagram))
+```
+
+**RULE 2: Use scale() for large objects**
+```python
+# Scale large shapes BEFORE adding to scene
+big_diagram = create_complex_diagram()
+big_diagram.scale(0.6)  # Scale down to 60%
+big_diagram.move_to(ORIGIN)  # Then center
+self.play(Create(big_diagram))
+```
+
+**RULE 3: Use safe positioning methods**
+```python
+# SAFE - stays on screen:
+obj.to_edge(LEFT, buff=0.5)   # buff keeps it away from edge
+obj.to_corner(UL, buff=0.3)   # Corner with buffer
+obj.move_to(ORIGIN)           # Center
+obj.next_to(other, RIGHT, buff=0.3)  # Relative to another
+
+# DANGEROUS - can go off screen:
+obj.shift(RIGHT * 8)  # ❌ Too far!
+obj.move_to([10, 0, 0])  # ❌ Outside bounds!
+```
+
+**RULE 4: For multiple items, arrange then scale**
+```python
+# Create items
+boxes = VGroup(*[Square().scale(0.5) for _ in range(8)])
+# Arrange in a row
+boxes.arrange(RIGHT, buff=0.2)
+# Scale entire group to fit
+boxes.scale_to_fit_width(11)  # Leave margin
+boxes.move_to(ORIGIN)
+```
+
+**RULE 5: For text with diagrams**
+```python
+# Title at top (scaled small)
+title = Text("Title", font_size=36).to_edge(UP, buff=0.3)
+
+# Diagram in center (scaled to fit remaining space)  
+diagram = create_diagram().scale(0.6)
+diagram.next_to(title, DOWN, buff=0.5)
+
+# Equation at bottom
+eq = MathTex(r"equation").to_edge(DOWN, buff=0.3)
+```
+
+**RULE 6: For 3D scenes, always scale down**
+```python
+# 3D objects appear larger - scale them down
+axes = ThreeDAxes().scale(0.5)
+surface = Surface(...).scale(0.4)
+```
+
+### Screen Zones (stay within these):
+- **TOP (y: 2.5 to 3.5)**: Titles only, font_size ≤ 42
+- **CENTER (y: -2 to 2)**: Main diagrams, MUST be scaled to fit
+- **BOTTOM (y: -3.5 to -2.5)**: Labels and equations, font_size ≤ 36
+
+### Prevent Overlap:
+```python
+# Show title ALONE first
+title = Text("Title", font_size=42)
+self.play(Write(title))
+self.wait(1.5)
+self.play(FadeOut(title))  # THEN show diagram
+
+# OR keep title and scale diagram to fit
+title.to_edge(UP)
+diagram.scale(0.5).shift(DOWN*0.3)  # Scale DOWN and leave room
+```
+
+### Transitions Between Sections:
+```python
+self.play(FadeOut(*self.mobjects))
+self.wait(0.5)
+# New section starts on blank canvas
+```
+
+## 📝 COMPLETE EXAMPLE (60-second video):
 
 ```python
 from manim import *
 
 class GenScene(Scene):
     def construct(self):
-        # PLAN:
-        # 1. Title (0-5s)
-        # 2. Definition (5-15s)
-        # 3. Visual Explanation (15-35s)
-        # 4. Example (35-50s)
-        # 5. Summary (50-60s)
-        # Total: ~60 seconds
-        
-        # === TITLE ===
-        title = Text("Topic Name", font_size=56, weight=BOLD, color=BLUE)
-        subtitle = Text("A clear explanation", font_size=32, color=GRAY_B)
-        header = VGroup(title, subtitle).arrange(DOWN, buff=0.3)
-        
+        # === SECTION 1: TITLE (5s) ===
+        title = Text("The Pythagorean Theorem", font_size=48, weight=BOLD)
         self.play(Write(title), run_time=1.5)
-        self.play(FadeIn(subtitle, shift=UP*0.2))
+        self.wait(2)
+        self.play(title.animate.scale(0.5).to_corner(UL))
+        
+        # === SECTION 2: BUILD THE TRIANGLE (15s) ===
+        # Create triangle progressively
+        triangle = Polygon(
+            ORIGIN, RIGHT*3, RIGHT*3 + UP*4,
+            color=BLUE_D, fill_opacity=0.3
+        ).move_to(ORIGIN)
+        
+        self.play(DrawBorderThenFill(triangle), run_time=2)
+        self.wait(1)
+        
+        # Add side labels one by one
+        a_label = MathTex("a", color=YELLOW).next_to(triangle, DOWN)
+        b_label = MathTex("b", color=YELLOW).next_to(triangle, RIGHT)
+        c_label = MathTex("c", color=RED_D).move_to(triangle.get_center() + LEFT*0.8 + UP*0.5)
+        
+        self.play(Write(a_label))
+        self.wait(0.5)
+        self.play(Write(b_label))
+        self.wait(0.5)
+        self.play(Write(c_label))
+        self.wait(1.5)
+        
+        # === SECTION 3: SHOW THE FORMULA (15s) ===
+        # Build equation step by step
+        eq_parts = VGroup(
+            MathTex(r"a^2", color=YELLOW),
+            MathTex(r"+", color=WHITE),
+            MathTex(r"b^2", color=YELLOW),
+            MathTex(r"=", color=WHITE),
+            MathTex(r"c^2", color=RED_D)
+        ).arrange(RIGHT, buff=0.3).to_edge(DOWN)
+        
+        for part in eq_parts:
+            self.play(Write(part), run_time=0.5)
+            self.wait(0.3)
+        
         self.wait(2)
         
-        # === TRANSITION ===
-        self.play(FadeOut(header))
-        self.wait(0.5)
+        # === SECTION 4: HIGHLIGHT THE RELATIONSHIP (10s) ===
+        # Flash to show connections
+        self.play(Indicate(a_label), Indicate(eq_parts[0]))
+        self.wait(1)
+        self.play(Indicate(b_label), Indicate(eq_parts[2]))
+        self.wait(1)
+        self.play(Indicate(c_label), Indicate(eq_parts[4]))
+        self.wait(2)
         
-        # === MAIN CONTENT ===
-        # ... continue with educational content ...
+        # === SECTION 5: CONCLUSION (15s) ===
+        self.play(FadeOut(triangle, a_label, b_label, c_label, title))
+        
+        final_eq = MathTex(r"a^2 + b^2 = c^2", font_size=72, color=GOLD)
+        final_eq.move_to(ORIGIN)
+        
+        self.play(TransformFromCopy(eq_parts, final_eq), run_time=2)
+        self.wait(1)
+        
+        box = SurroundingRectangle(final_eq, color=BLUE_D, buff=0.3)
+        self.play(Create(box))
+        self.wait(3)
 ```
 
-### YOUR TASK:
-Generate a complete, working Manim animation for: "{prompt}"
-Duration: Follow the timing guide above EXACTLY.
+## YOUR TASK:
+Create a STUNNING 3Blue1Brown-quality animation for: "{prompt}"
 
-Return ONLY the Python code. No markdown, no backticks, no explanation.
+Focus on:
+1. Progressive visual construction
+2. Meaningful transformations that teach
+3. Elegant color usage
+4. Proper pacing with wait() calls
+5. Mathematical accuracy
+
+Return ONLY executable Python code. No markdown, no explanation.
 """
 
 def clean_code(code: str) -> str:
