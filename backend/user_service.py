@@ -2,9 +2,9 @@
 User Service - Handles user credits, tiers, and usage tracking.
 
 Tiers:
-- Free: 5 videos/month (resets monthly)
-- Basic: 5 one-time credits ($3)
-- Pro: 50 videos/month, resets monthly ($20/month)
+- Free: 5 videos/month at 720p only (resets monthly)
+- Basic: 5 one-time credits ($3), 4K costs 2.5 credits
+- Pro: 50 videos/month at any resolution, 1 credit each ($20/month)
 """
 
 from datetime import datetime, timedelta
@@ -12,21 +12,32 @@ from typing import Optional, Dict, Any
 from .database import get_database
 
 
+# Resolution credit costs for Basic tier
+# Pro tier always costs 1 credit regardless of resolution
+RESOLUTION_COSTS = {
+    "720p": 1.0,
+    "1080p": 1.0,
+    "4k": 2.5
+}
+
 # Tier definitions
 TIERS = {
     "free": {
         "monthly_limit": 5,
         "max_length": "Long (1m)",  # Max 1 minute for free
+        "allowed_resolutions": ["720p"],  # Only 720p for free
         "quality": "720p30"
     },
     "basic": {
         "credits": 5,  # One-time purchase
         "max_length": "Extended (5m)",  # Up to 5 minutes
+        "allowed_resolutions": ["720p", "1080p", "4k"],
         "quality": "1080p60"
     },
     "pro": {
         "monthly_limit": 50,
         "max_length": "Extended (5m)",  # Up to 5 minutes
+        "allowed_resolutions": ["720p", "1080p", "4k"],
         "quality": "4k60"
     }
 }
@@ -161,9 +172,15 @@ async def check_can_generate(clerk_id: str) -> Dict[str, Any]:
     }
 
 
-async def increment_usage(clerk_id: str) -> bool:
+async def increment_usage(clerk_id: str, resolution: str = "720p") -> bool:
     """
     Increment usage after successful video generation.
+    
+    Credit costs:
+    - Pro tier: Always 1 credit regardless of resolution
+    - Basic tier: Uses RESOLUTION_COSTS (4K = 2.5 credits)
+    - Free tier: Always 1 from monthly count
+    
     Uses basic credits first if available, otherwise monthly count.
     """
     user = await get_or_create_user(clerk_id)
@@ -173,19 +190,37 @@ async def increment_usage(clerk_id: str) -> bool:
     tier = user.get("tier", "free")
     basic_credits = user.get("basic_credits", 0)
     
-    # If user has basic credits, use those first
+    # Determine credit cost based on tier and resolution
+    if tier == "pro":
+        # Pro tier: All resolutions cost 1 credit
+        credit_cost = 1.0
+    else:
+        # Basic/Free tier: Use resolution cost table
+        credit_cost = RESOLUTION_COSTS.get(resolution, 1.0)
+    
+    # If user has basic credits, use those first (Basic tier with purchased credits)
     if basic_credits > 0:
+        # Deduct based on resolution cost
+        new_credits = basic_credits - credit_cost
+        
+        # Ensure we don't go negative
+        if new_credits < 0:
+            print(f"⚠️ Not enough Basic credits for {resolution}. Has {basic_credits}, needs {credit_cost}")
+            return False
+        
         await users.update_one(
             {"clerk_id": clerk_id},
             {
-                "$inc": {"basic_credits": -1},
-                "$set": {"updated_at": now}
+                "$set": {
+                    "basic_credits": new_credits,
+                    "updated_at": now
+                }
             }
         )
-        print(f"💳 Used 1 Basic credit for {clerk_id}, {basic_credits - 1} remaining")
+        print(f"💳 Used {credit_cost} Basic credit(s) for {resolution}, {new_credits} remaining")
         return True
     
-    # Otherwise increment monthly count
+    # Otherwise increment monthly count (Pro and Free tiers)
     await users.update_one(
         {"clerk_id": clerk_id},
         {
@@ -193,7 +228,7 @@ async def increment_usage(clerk_id: str) -> bool:
             "$set": {"updated_at": now}
         }
     )
-    print(f"📊 Incremented monthly count for {clerk_id}")
+    print(f"📊 Incremented monthly count for {clerk_id} ({tier} tier, {resolution})")
     return True
 
 

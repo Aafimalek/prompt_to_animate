@@ -52,6 +52,7 @@ app.mount("/videos", StaticFiles(directory="generated_animations"), name="videos
 class AnimationRequest(BaseModel):
     prompt: str
     length: str = "Medium (15s)"  # Default
+    resolution: str = "720p"  # 720p, 1080p, 4k
     clerk_id: Optional[str] = None  # Clerk user ID for authenticated users
 
 
@@ -79,7 +80,7 @@ async def generate_animation(request: AnimationRequest):
         # Enqueue the video generation task
         job = queue.enqueue(
             process_video_generation,
-            args=(request.prompt, request.length, request.clerk_id or "anonymous", job_id),
+            args=(request.prompt, request.length, request.clerk_id or "anonymous", job_id, request.resolution),
             job_id=job_id,
             job_timeout=600,
             result_ttl=3600,
@@ -161,7 +162,7 @@ async def generate_animation_stream(request: AnimationRequest):
             # Enqueue the video generation task
             job = queue.enqueue(
                 process_video_generation,
-                args=(request.prompt, request.length, request.clerk_id, job_id),
+                args=(request.prompt, request.length, request.clerk_id, job_id, request.resolution),
                 job_id=job_id,
                 job_timeout=600,  # 10 minute timeout for long videos
                 result_ttl=3600,  # Keep result for 1 hour

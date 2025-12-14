@@ -6,7 +6,15 @@ import shutil
 from pathlib import Path
 from .s3_service import upload_video_to_s3
 
-def execute_manim_code(code: str, upload_to_s3: bool = True) -> tuple[str, str]:
+# Resolution to Manim quality flag mapping
+QUALITY_FLAGS = {
+    "720p": "-qm",   # 720p @ 30fps (medium quality)
+    "1080p": "-qh",  # 1080p @ 60fps (high quality)
+    "4k": "-qk"      # 4K @ 60fps (production quality)
+}
+
+
+def execute_manim_code(code: str, upload_to_s3: bool = True, resolution: str = "1080p") -> tuple[str, str]:
     """
     Executes the given Manim code and returns the S3 key and local path of the generated video.
     Uses GPU-accelerated OpenGL rendering for maximum speed without quality loss.
@@ -14,6 +22,7 @@ def execute_manim_code(code: str, upload_to_s3: bool = True) -> tuple[str, str]:
     Args:
         code: The Manim Python code to execute
         upload_to_s3: Whether to upload the video to S3 (default: True)
+        resolution: Video resolution - "720p", "1080p", or "4k" (default: "1080p")
     
     Returns:
         Tuple of (s3_key, local_path) if upload_to_s3 is True
@@ -36,10 +45,14 @@ def execute_manim_code(code: str, upload_to_s3: bool = True) -> tuple[str, str]:
     output_root = Path("generated_animations").resolve()
     output_root.mkdir(parents=True, exist_ok=True)
     
-    # Cairo renderer for cloud-compatible CPU-based rendering (1080p @ 60fps)
+    # Get quality flag based on resolution
+    quality_flag = QUALITY_FLAGS.get(resolution, "-qh")
+    print(f"📹 Rendering at {resolution} using {quality_flag}")
+    
+    # Cairo renderer for cloud-compatible CPU-based rendering
     cmd = [
         sys.executable, "-m", "manim",
-        "-qh",  # Quality High (1080p @ 60fps)
+        quality_flag,  # Dynamic quality based on resolution
         "--disable_caching",  # Skip caching overhead
         "--media_dir", str(output_root),
         str(filepath),

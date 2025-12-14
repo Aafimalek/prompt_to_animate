@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Wand2, ChevronDown, Download, Loader2, Code, Share2, Check, Sparkles, Film, Package, LogIn, Crown, Zap } from 'lucide-react';
+import { Wand2, ChevronDown, Download, Loader2, Code, Share2, Check, Sparkles, Film, Package, LogIn, Crown, Zap, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { HistoryItem } from './Sidebar';
@@ -39,15 +39,24 @@ const PROGRESS_STEPS = [
     { id: 6, label: 'Complete', icon: Check },
 ];
 
+// Resolution options with tier requirements and costs
+const RESOLUTIONS = [
+    { id: '720p', label: '720p 30fps', minTier: 'free', cost: 1, costLabel: '' },
+    { id: '1080p', label: '1080p 60fps', minTier: 'basic', cost: 1, costLabel: '' },
+    { id: '4k', label: '4K 60fps', minTier: 'basic', cost: 2.5, costLabel: '2.5x' },
+];
+
 export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeClick, usageRefreshTrigger }: AnimationGeneratorProps) {
     const { user, isSignedIn } = useUser();
     const [prompt, setPrompt] = useState('');
     const [length, setLength] = useState('Medium (15s)');
+    const [resolution, setResolution] = useState('720p');
     const [loading, setLoading] = useState(false);
     const [videoUrl, setVideoUrl] = useState<string | null>(null);
     const [code, setCode] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+    const [isResolutionDropdownOpen, setIsResolutionDropdownOpen] = useState(false);
     const [currentProgress, setCurrentProgress] = useState<ProgressStep | null>(null);
     const [usage, setUsage] = useState<UsageInfo | null>(null);
 
@@ -76,12 +85,26 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
             if (!target.closest('.custom-dropdown-container')) {
                 setIsDropdownOpen(false);
             }
+            if (!target.closest('.resolution-dropdown-container')) {
+                setIsResolutionDropdownOpen(false);
+            }
         };
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
     const lengths = ['Medium (15s)', 'Long (1m)', 'Deep Dive (2m)', 'Extended (5m)'];
+
+    // Check if user can access a resolution based on their tier
+    const canAccessResolution = (minTier: string): boolean => {
+        if (!usage) return minTier === 'free';
+        const tierOrder = ['free', 'basic', 'pro'];
+        const userTierIndex = tierOrder.indexOf(usage.tier);
+        const requiredTierIndex = tierOrder.indexOf(minTier);
+        // Basic with credits counts as basic tier
+        if (usage.basic_credits > 0) return true;
+        return userTierIndex >= requiredTierIndex;
+    };
 
     useEffect(() => {
         if (initialData) {
@@ -112,6 +135,7 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
                 body: JSON.stringify({
                     prompt,
                     length,
+                    resolution,
                     clerk_id: isSignedIn ? user?.id : undefined
                 }),
             });
@@ -297,6 +321,73 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
                                                         {length === l && <Wand2 className="w-3 h-3 text-white/90" />}
                                                     </button>
                                                 ))}
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+
+                            {/* Resolution Dropdown */}
+                            <div className="relative resolution-dropdown-container z-40">
+                                <button
+                                    onClick={() => setIsResolutionDropdownOpen(!isResolutionDropdownOpen)}
+                                    className={cn(
+                                        "flex items-center space-x-2 px-4 py-2.5 rounded-full text-xs font-medium transition-all duration-200 border-2 select-none",
+                                        "bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100",
+                                        "border-zinc-200 dark:border-zinc-700",
+                                        "hover:border-orange-500 hover:text-orange-600 dark:hover:text-orange-400",
+                                        isResolutionDropdownOpen && "border-orange-500 ring-2 ring-orange-500/20 text-orange-600 dark:text-orange-400"
+                                    )}
+                                >
+                                    <Film className="w-3.5 h-3.5" />
+                                    <span>{RESOLUTIONS.find(r => r.id === resolution)?.label || resolution}</span>
+                                    <ChevronDown className={cn("w-3.5 h-3.5 transition-transform duration-200", isResolutionDropdownOpen && "rotate-180")} />
+                                </button>
+
+                                <AnimatePresence>
+                                    {isResolutionDropdownOpen && (
+                                        <motion.div
+                                            initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                                            exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                                            transition={{ duration: 0.15, ease: "easeOut" }}
+                                            className="absolute bottom-full left-0 mb-2 w-44 p-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl shadow-xl overflow-hidden z-50 origin-bottom-left"
+                                        >
+                                            <div className="flex flex-col space-y-0.5">
+                                                {RESOLUTIONS.map((r) => {
+                                                    const isLocked = !canAccessResolution(r.minTier);
+                                                    const isSelected = resolution === r.id;
+
+                                                    return (
+                                                        <button
+                                                            key={r.id}
+                                                            onClick={() => {
+                                                                if (!isLocked) {
+                                                                    setResolution(r.id);
+                                                                    setIsResolutionDropdownOpen(false);
+                                                                }
+                                                            }}
+                                                            disabled={isLocked}
+                                                            className={cn(
+                                                                "w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition-all flex items-center justify-between",
+                                                                isSelected && !isLocked
+                                                                    ? "bg-orange-500 text-white shadow-md shadow-orange-500/20"
+                                                                    : isLocked
+                                                                        ? "text-zinc-400 dark:text-zinc-600 cursor-not-allowed"
+                                                                        : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white"
+                                                            )}
+                                                        >
+                                                            <span className="flex items-center gap-2">
+                                                                {isLocked && <Lock className="w-3 h-3" />}
+                                                                {r.label}
+                                                            </span>
+                                                            <span className="flex items-center gap-1">
+                                                                {r.costLabel && <span className="text-[10px] opacity-70">{r.costLabel}</span>}
+                                                                {isSelected && !isLocked && <Check className="w-3 h-3 text-white/90" />}
+                                                            </span>
+                                                        </button>
+                                                    );
+                                                })}
                                             </div>
                                         </motion.div>
                                     )}

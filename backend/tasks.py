@@ -44,7 +44,8 @@ def process_video_generation(
     prompt: str,
     length: str,
     clerk_id: str,
-    job_id: str
+    job_id: str,
+    resolution: str = "720p"
 ) -> dict:
     """
     Main video generation task - runs in RQ worker.
@@ -58,6 +59,7 @@ def process_video_generation(
         length: Video length selection
         clerk_id: Clerk user ID
         job_id: Unique job identifier for progress tracking
+        resolution: Video resolution (720p, 1080p, 4k)
     
     Returns:
         dict with video_url, code, chat_id on success
@@ -85,10 +87,10 @@ def process_video_generation(
             report_progress(redis_conn, job_id, 3, "code_ready", "Code generated successfully!")
             
             # Step 4: Rendering animation
-            report_progress(redis_conn, job_id, 4, "rendering", "Rendering animation frames...")
+            report_progress(redis_conn, job_id, 4, "rendering", f"Rendering at {resolution}...")
             
             from .manim_service import execute_manim_code
-            s3_key, local_filename = execute_manim_code(code)
+            s3_key, local_filename = execute_manim_code(code, resolution=resolution)
             
             # Step 5: Uploading to cloud
             report_progress(redis_conn, job_id, 5, "finalizing", "Uploading to cloud storage...")
@@ -111,9 +113,9 @@ def process_video_generation(
             except Exception as db_error:
                 print(f"⚠️ Failed to save chat to MongoDB: {db_error}")
             
-            # Increment usage
+            # Increment usage with resolution-based cost
             from .user_service import increment_usage
-            loop.run_until_complete(increment_usage(clerk_id))
+            loop.run_until_complete(increment_usage(clerk_id, resolution=resolution))
             
             # Step 6: Complete
             result = {
