@@ -33,8 +33,8 @@ Manimancer is a full-stack web application that generates high-quality education
 | Feature | Description |
 |:--------|:------------|
 | 🪄 **AI-Powered Generation** | Describe what you want in plain English, and the AI writes production-ready Manim code |
-| 🎥 **High-Quality Output** | Videos rendered at **1920×1080 @ 60fps** for crisp, smooth animations |
-| ⏱️ **Configurable Duration** | Choose from Short (5s), Medium (15s), Long (1m), or Deep Dive (2m+) |
+| 🎥 **Resolution Selector** | Choose from **720p 30fps**, **1080p 60fps**, or **4K 60fps** based on your tier |
+| ⏱️ **Configurable Duration** | Choose from Short (5s), Medium (15s), Long (1m), Deep Dive (2m+), or Extended (5m) |
 | 📜 **Code Transparency** | Inspect the generated Manim Python code powering your animation |
 | 💾 **One-Click Download** | Save your creations directly to your device |
 | ☁️ **Cloud Storage (S3)** | Videos stored securely in AWS S3 with CloudFront CDN delivery |
@@ -42,7 +42,7 @@ Manimancer is a full-stack web application that generates high-quality education
 | 🔐 **User Authentication** | Secure sign-in/sign-up with Clerk (modal-based, no redirect) |
 | 🗄️ **MongoDB Persistence** | Chat history and video references saved per-user in MongoDB Atlas |
 | 💳 **Dodo Payments** | Secure payment processing for subscriptions and one-time purchases |
-| 💎 **Pricing Plans** | Free, Basic ($3), and Pro ($20/mo) tiers with usage limits |
+| 💎 **Pricing Plans** | Free, Basic ($3), and Pro ($20/mo) tiers with resolution access |
 | 🌗 **Dark Mode** | Beautiful glassmorphic UI with full dark mode support |
 | 📱 **Responsive Design** | Works seamlessly on desktop and mobile devices |
 | 📚 **History Sidebar** | Browse and replay your previously generated animations (persisted) |
@@ -65,6 +65,14 @@ Manimancer is a full-stack web application that generates high-quality education
 | **Long (1m)** | 55-70 seconds | Detailed tutorials with multiple sections |
 | **Deep Dive (2m+)** | 110-130 seconds | Comprehensive lessons with 6 sections and examples |
 | **Extended (5m)** | 280-320 seconds | University mini-lectures with 8 sections |
+
+### Video Resolutions
+
+| Resolution | Manim Flag | Free Tier | Basic Tier | Pro Tier |
+|:-----------|:-----------|:----------|:-----------|:---------|
+| **720p 30fps** | `-qm` | ✅ | ✅ (1 credit) | ✅ (1 credit) |
+| **1080p 60fps** | `-qh` | 🔒 Locked | ✅ (1 credit) | ✅ (1 credit) |
+| **4K 60fps** | `-qk` | 🔒 Locked | ✅ (2.5 credits) | ✅ (1 credit) |
 
 ---
 
@@ -721,7 +729,8 @@ Standard request/response endpoint (no streaming).
 ```json
 {
   "prompt": "Explain the Pythagorean theorem",
-  "length": "Medium (15s)"
+  "length": "Medium (15s)",
+  "resolution": "720p"
 }
 ```
 
@@ -737,7 +746,17 @@ Standard request/response endpoint (no streaming).
 
 Streaming endpoint using Server-Sent Events (SSE).
 
-**Request Body:** Same as `/generate`
+**Request Body:**
+```json
+{
+  "prompt": "Explain the Pythagorean theorem",
+  "length": "Medium (15s)",
+  "resolution": "1080p",
+  "clerk_id": "user_abc123"
+}
+```
+
+**Resolution options:** `720p`, `1080p`, `4k`
 
 **Response:** `text/event-stream`
 
@@ -1018,29 +1037,31 @@ Manimancer offers three pricing tiers with usage-based limits stored in MongoDB.
 |:--------|:----------|:-----------|:-------------|
 | **Videos** | 5/month | 5 one-time credits | 50/month |
 | **Reset** | 1st of each month | Never (one-time) | 30 days from purchase |
-| **Max Resolution** | 1080p | 1080p | 4K |
-| **Frame Rate** | 60 FPS | 60 FPS | 60 FPS |
+| **720p 30fps** | ✅ | ✅ (1 credit) | ✅ (1 credit) |
+| **1080p 60fps** | 🔒 Locked | ✅ (1 credit) | ✅ (1 credit) |
+| **4K 60fps** | 🔒 Locked | ✅ (2.5 credits) | ✅ (1 credit) |
 | **Max Length** | 1 minute | 5 minutes | 5 minutes |
 
 ### Plan Details
 
 #### Free Tier
 - **5 videos per month** (resets on the 1st)
-- 1080p @ 60fps quality
+- **720p @ 30fps only** (1080p and 4K locked)
 - Maximum 1 minute per video
 - No credit card required
 
 #### Basic Tier ($3 one-time)
 - **5 video credits** (never expire)
+- Access to **all resolutions** (720p, 1080p, 4K)
+- **4K costs 2.5 credits** per video
 - Credits are consumed before free monthly limit
-- 1080p @ 60fps quality
 - Up to 5 minutes per video
 - One-time purchase, no subscription
 
 #### Pro Tier ($20/month subscription)
 - **50 videos per month**
 - Resets **30 days from purchase date** (not 1st of month)
-- 4K @ 60fps quality
+- **All resolutions at 1 credit each** (including 4K)
 - Up to 5 minutes per video
 - Priority rendering
 - **Upgrade button hides** when Pro is active
@@ -1143,6 +1164,7 @@ This project is open-source and available under the [MIT License](LICENSE).
 
 | Update | Description |
 |:-------|:------------|
+| **🎬 Resolution Selector** | Choose 720p, 1080p, or 4K with tier-based restrictions and costs |
 | **🐳 Docker Compose** | Full containerized deployment with pta-api, pta-worker, pta-redis, pta-mongo |
 | **💾 Data Persistence Docs** | Clear documentation on volume persistence and commands |
 | **🧪 Testing Guide** | 8-step verification checklist for all components |

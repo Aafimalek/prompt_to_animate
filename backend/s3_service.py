@@ -70,19 +70,38 @@ def upload_video_to_s3(local_path: str, s3_key: str = None) -> str:
 def _rsa_sign(message: bytes, private_key_path: str) -> bytes:
     """
     Sign a message using RSA private key for CloudFront signed URLs.
-    """
-    # Resolve the private key path relative to the backend directory
-    if not os.path.isabs(private_key_path):
-        # If relative, resolve from project root
-        project_root = Path(__file__).parent.parent
-        private_key_path = project_root / private_key_path
     
-    with open(private_key_path, "rb") as key_file:
-        private_key = serialization.load_pem_private_key(
-            key_file.read(),
-            password=None,
-            backend=default_backend()
-        )
+    Supports two methods:
+    1. CLOUDFRONT_PRIVATE_KEY_BASE64 env var (for cloud deployment)
+    2. File path (for local development)
+    """
+    # First, check if private key is provided via environment variable (base64 encoded)
+    private_key_base64 = os.getenv("CLOUDFRONT_PRIVATE_KEY_BASE64")
+    
+    if private_key_base64:
+        # Decode from base64 and load the private key
+        try:
+            private_key_pem = base64.b64decode(private_key_base64)
+            private_key = serialization.load_pem_private_key(
+                private_key_pem,
+                password=None,
+                backend=default_backend()
+            )
+        except Exception as e:
+            raise Exception(f"Failed to decode CLOUDFRONT_PRIVATE_KEY_BASE64: {e}")
+    else:
+        # Fall back to file-based loading (local development)
+        if not os.path.isabs(private_key_path):
+            # If relative, resolve from project root
+            project_root = Path(__file__).parent.parent
+            private_key_path = project_root / private_key_path
+        
+        with open(private_key_path, "rb") as key_file:
+            private_key = serialization.load_pem_private_key(
+                key_file.read(),
+                password=None,
+                backend=default_backend()
+            )
     
     signature = private_key.sign(
         message,

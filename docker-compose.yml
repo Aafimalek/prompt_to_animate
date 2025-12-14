@@ -23,11 +23,12 @@ services:
       # Mount env file secrets (keys, etc.)
       - ./private_key.pem:/app/private_key.pem:ro
     environment:
-      # Redis connection (internal Docker network)
+      # Redis connection - use REDIS_URL for Upstash, or leave empty for local Docker Redis
+      - REDIS_URL=${REDIS_URL:-}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=
-      # MongoDB connection (internal Docker network)
+      # MongoDB connection (internal Docker network or Atlas)
       - MONGODB_URI=mongodb://mongo:27017/prompt_to_animate
       - MONGODB_DATABASE=prompt_to_animate
       # These should be set from your .env or secrets
@@ -39,6 +40,8 @@ services:
       - CLOUDFRONT_DOMAIN=${CLOUDFRONT_DOMAIN}
       - CLOUDFRONT_KEY_PAIR_ID=${CLOUDFRONT_KEY_PAIR_ID}
       - CLOUDFRONT_PRIVATE_KEY_PATH=/app/private_key.pem
+      # For testing base64 key (set in .env to test production-like setup)
+      - CLOUDFRONT_PRIVATE_KEY_BASE64=${CLOUDFRONT_PRIVATE_KEY_BASE64:-}
     depends_on:
       redis:
         condition: service_healthy
@@ -68,7 +71,8 @@ services:
       # Mount env file secrets
       - ./private_key.pem:/app/private_key.pem:ro
     environment:
-      # Redis connection
+      # Redis connection - use REDIS_URL for Upstash, or leave empty for local Docker Redis
+      - REDIS_URL=${REDIS_URL:-}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=
@@ -84,6 +88,8 @@ services:
       - CLOUDFRONT_DOMAIN=${CLOUDFRONT_DOMAIN}
       - CLOUDFRONT_KEY_PAIR_ID=${CLOUDFRONT_KEY_PAIR_ID}
       - CLOUDFRONT_PRIVATE_KEY_PATH=/app/private_key.pem
+      # For testing base64 key (set in .env to test production-like setup)
+      - CLOUDFRONT_PRIVATE_KEY_BASE64=${CLOUDFRONT_PRIVATE_KEY_BASE64:-}
     depends_on:
       redis:
         condition: service_healthy
