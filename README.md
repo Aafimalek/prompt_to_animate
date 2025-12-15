@@ -1187,8 +1187,8 @@ The sidebar shows different states based on user tier:
 
 | Product | Product ID |
 |:--------|:-----------|
-| Manimancer Basic | `pdt_9pgk0uVBWpT13GL0Mfqbc` |
-| Manimancer Pro | `pdt_hf3NUNKCCKbDR5HKinOXI` |
+| Manimancer Basic | `pdt_your_basic_product_id` |
+| Manimancer Pro | `pdt_your_pro_product_id` |
 
 #### Environment Variables
 
@@ -1196,11 +1196,11 @@ The sidebar shows different states based on user tier:
 # frontend/.env.local
 DODO_PAYMENTS_API_KEY=your_live_api_key
 DODO_PAYMENTS_WEBHOOK_KEY=whsec_your_webhook_secret
-DODO_PAYMENTS_RETURN_URL=https://www.manimancer.fun/
+DODO_PAYMENTS_RETURN_URL=https://your-domain.com/
 DODO_PAYMENTS_ENVIRONMENT=live_mode
 
-NEXT_PUBLIC_DODO_BASIC_PRODUCT_ID=pdt_9pgk0uVBWpT13GL0Mfqbc
-NEXT_PUBLIC_DODO_PRO_PRODUCT_ID=pdt_hf3NUNKCCKbDR5HKinOXI
+NEXT_PUBLIC_DODO_BASIC_PRODUCT_ID=pdt_your_basic_product_id
+NEXT_PUBLIC_DODO_PRO_PRODUCT_ID=pdt_your_pro_product_id
 ```
 
 #### Webhook Endpoint
@@ -1208,7 +1208,7 @@ NEXT_PUBLIC_DODO_PRO_PRODUCT_ID=pdt_hf3NUNKCCKbDR5HKinOXI
 Set this URL in your Dodo Payments dashboard:
 
 ```
-https://www.manimancer.fun/api/webhook/dodo
+https://your-domain.com/api/webhook/dodo
 ```
 
 The webhook handler:
