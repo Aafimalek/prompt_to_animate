@@ -2,6 +2,8 @@
 
 > **Turn your ideas into stunning 2D animations with AI.**
 
+🌐 **Live Demo:** [manimancer.fun](https://www.manimancer.fun)
+
 Manimancer is a full-stack web application that generates high-quality educational animations from simple text prompts. Powered by AI (Groq LLM) and the Manim library, it transforms your concepts into professional visualizations in seconds.
 
 ---
@@ -14,7 +16,8 @@ Manimancer is a full-stack web application that generates high-quality education
 - [Tech Stack](#-tech-stack)
 - [Project Structure](#-project-structure)
 - [Getting Started](#-getting-started)
-- [Docker Deployment](#-docker-deployment)
+- [Production Deployment](#-production-deployment)
+- [Docker Deployment (Local)](#-docker-deployment-local-development)
 - [Data Persistence](#-data-persistence)
 - [Testing Guide](#-testing-guide)
 - [How It Works](#-how-it-works)
@@ -78,12 +81,23 @@ Manimancer is a full-stack web application that generates high-quality education
 
 ## 🏗️ Architecture
 
+### Production Deployment
+
+| Component | Platform | URL |
+|:----------|:---------|:----|
+| **Frontend** | Vercel | [manimancer.fun](https://www.manimancer.fun) |
+| **Backend API** | DigitalOcean App Platform | [manimancer-api-n4gox.ondigitalocean.app](https://manimancer-api-n4gox.ondigitalocean.app) |
+| **Worker** | DigitalOcean App Platform | Same app, separate container |
+| **Database** | MongoDB Atlas | Cloud-hosted |
+| **Redis** | Upstash | Serverless Redis |
+| **Video Storage** | AWS S3 + CloudFront | CDN-delivered with signed URLs |
+
 ### High-Level System Architecture
 
 ```mermaid
 flowchart TB
     subgraph Browser["🌐 User's Browser"]
-        subgraph Frontend["Next.js 16 Frontend (localhost:3000)"]
+        subgraph Frontend["Next.js 16 Frontend (Vercel)"]
             Clerk["Clerk Auth<br/>(Sign In/Up Modal)"]
             UI["AnimationGenerator<br/>Component"]
             Sidebar["History Sidebar<br/>+ Upgrade Button"]
@@ -91,24 +105,16 @@ flowchart TB
         end
     end
     
-    subgraph Docker["🐳 Docker Compose (pta-network)"]
-        subgraph API["pta-api (Port 8000)"]
+    subgraph DigitalOcean["🌊 DigitalOcean App Platform"]
+        subgraph API["Backend API (Web Service)"]
             FastAPI["FastAPI Backend"]
             LLM["llm_service.py"]
+        end
+        
+        subgraph Worker["Background Worker"]
+            RQ["RQ Worker<br/>(Video Generation)"]
             Manim["manim_service.py"]
         end
-        
-        subgraph Worker["pta-worker"]
-            RQ["RQ Worker<br/>(Background Jobs)"]
-        end
-        
-        Redis["pta-redis<br/>(Job Queue)"]
-        Mongo["pta-mongo<br/>(Database)"]
-    end
-    
-    subgraph Volumes["💾 Docker Volumes (Persistent)"]
-        MongoVol["mongo-data"]
-        RedisVol["redis-data"]
     end
     
     subgraph External["☁️ External Services"]
@@ -116,6 +122,8 @@ flowchart TB
         ClerkAPI["Clerk API"]
         S3["AWS S3 Bucket"]
         CloudFront["CloudFront CDN"]
+        Upstash["Upstash Redis"]
+        MongoAtlas["MongoDB Atlas"]
     end
     
     Clerk --> ClerkAPI
@@ -123,15 +131,13 @@ flowchart TB
     FastAPI --> LLM
     LLM -->|"Prompt"| Groq
     Groq -->|"Manim Code"| LLM
-    FastAPI -->|"Enqueue Job"| Redis
-    Redis --> RQ
+    FastAPI -->|"Enqueue Job"| Upstash
+    Upstash --> RQ
     RQ --> Manim
     Manim -->|"Render Video"| S3
     S3 --> CloudFront
     CloudFront -->|"Signed URL"| UI
-    FastAPI -->|"Save Chat"| Mongo
-    Mongo --> MongoVol
-    Redis --> RedisVol
+    FastAPI -->|"Save Chat"| MongoAtlas
 ```
 
 ### Request Flow Sequence
@@ -474,7 +480,67 @@ Navigate to **http://localhost:3000** in your browser.
 
 ---
 
-## 🐳 Docker Deployment
+## 🌐 Production Deployment
+
+Manimancer is deployed using **DigitalOcean App Platform** (backend) and **Vercel** (frontend).
+
+### Current Production URLs
+
+| Service | URL |
+|:--------|:----|
+| **Frontend** | [manimancer.fun](https://www.manimancer.fun) |
+| **Backend API** | [manimancer-api-n4gox.ondigitalocean.app](https://manimancer-api-n4gox.ondigitalocean.app) |
+| **API Docs** | [/docs](https://manimancer-api-n4gox.ondigitalocean.app/docs) |
+| **Health Check** | [/health](https://manimancer-api-n4gox.ondigitalocean.app/health) |
+
+### DigitalOcean App Platform Setup
+
+The backend runs on DigitalOcean App Platform with two components:
+
+| Component | Type | Specs | Cost | Run Command |
+|:----------|:-----|:------|:-----|:------------|
+| **API** | Web Service | 1 vCPU, 1GB RAM | $12/mo | `uvicorn backend.main:app --host 0.0.0.0 --port 8000` |
+| **Worker** | Worker | 2 vCPU, 4GB RAM | $50/mo | `python -m backend.worker` |
+
+**Total: ~$62/month**
+
+#### Environment Variables (DigitalOcean)
+
+Both API and Worker components need these environment variables:
+
+```env
+GROQ_API_KEY=your_groq_api_key
+AWS_ACCESS_KEY_ID=your_aws_access_key
+AWS_SECRET_ACCESS_KEY=your_aws_secret_key
+AWS_REGION=ap-south-1
+S3_BUCKET_NAME=your_s3_bucket_name
+CLOUDFRONT_DOMAIN=your_cloudfront_domain.cloudfront.net
+CLOUDFRONT_KEY_PAIR_ID=your_key_pair_id
+CLOUDFRONT_PRIVATE_KEY_BASE64=your_base64_encoded_private_key
+REDIS_URL=rediss://your_upstash_redis_url
+MONGODB_URI=mongodb+srv://your_mongodb_atlas_uri
+MONGODB_DATABASE=prompt_to_animate
+```
+
+### Vercel Frontend Setup
+
+1. Import the repository on [Vercel](https://vercel.com)
+2. Set the root directory to `frontend`
+3. Add environment variables:
+
+```env
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_your_key
+CLERK_SECRET_KEY=sk_live_your_key
+NEXT_PUBLIC_API_URL=https://manimancer-api-n4gox.ondigitalocean.app
+DODO_PAYMENTS_API_KEY=your_dodo_api_key
+DODO_PAYMENTS_WEBHOOK_KEY=whsec_your_webhook_secret
+```
+
+4. Deploy and add custom domain (manimancer.fun)
+
+---
+
+## 🐳 Docker Deployment (Local Development)
 
 The recommended way to run Manimancer locally is using Docker Compose, which handles all dependencies automatically.
 
@@ -713,11 +779,12 @@ The `/generate-stream` endpoint sends **6 progress updates** via Server-Sent Eve
 
 ## 📡 API Reference
 
-### Base URL
+### Base URLs
 
-```
-http://localhost:8000
-```
+| Environment | URL |
+|:------------|:----|
+| **Production** | `https://manimancer-api-n4gox.ondigitalocean.app` |
+| **Local Development** | `http://localhost:8000` |
 
 ### Endpoints
 
@@ -1129,7 +1196,7 @@ The sidebar shows different states based on user tier:
 # frontend/.env.local
 DODO_PAYMENTS_API_KEY=your_live_api_key
 DODO_PAYMENTS_WEBHOOK_KEY=whsec_your_webhook_secret
-DODO_PAYMENTS_RETURN_URL=https://manimancer.vercel.app/
+DODO_PAYMENTS_RETURN_URL=https://www.manimancer.fun/
 DODO_PAYMENTS_ENVIRONMENT=live_mode
 
 NEXT_PUBLIC_DODO_BASIC_PRODUCT_ID=pdt_9pgk0uVBWpT13GL0Mfqbc
@@ -1141,7 +1208,7 @@ NEXT_PUBLIC_DODO_PRO_PRODUCT_ID=pdt_hf3NUNKCCKbDR5HKinOXI
 Set this URL in your Dodo Payments dashboard:
 
 ```
-https://manimancer.vercel.app/api/webhook/dodo
+https://www.manimancer.fun/api/webhook/dodo
 ```
 
 The webhook handler:
@@ -1164,8 +1231,11 @@ This project is open-source and available under the [MIT License](LICENSE).
 
 | Update | Description |
 |:-------|:------------|
+| **🌊 DigitalOcean Deployment** | Production backend deployed on DigitalOcean App Platform (~$62/mo) |
+| **🌐 Live at manimancer.fun** | Frontend deployed on Vercel with custom domain |
+| **🖼️ OG Image** | Added Open Graph image for social media sharing |
 | **🎬 Resolution Selector** | Choose 720p, 1080p, or 4K with tier-based restrictions and costs |
-| **🐳 Docker Compose** | Full containerized deployment with pta-api, pta-worker, pta-redis, pta-mongo |
+| **🐳 Docker Compose** | Full containerized deployment for local development |
 | **💾 Data Persistence Docs** | Clear documentation on volume persistence and commands |
 | **🧪 Testing Guide** | 8-step verification checklist for all components |
 | **📊 Extended (5m)** | New 5-minute duration for university mini-lectures |
