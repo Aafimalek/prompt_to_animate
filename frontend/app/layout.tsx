@@ -15,6 +15,29 @@ const nabla = Nabla({
 export const metadata: Metadata = {
   title: "Manimancer",
   description: "Generate 2D animations from text prompts using AI",
+  metadataBase: new URL("https://www.manimancer.fun"),
+  openGraph: {
+    title: "Manimancer",
+    description: "Generate 2D animations from text prompts using AI",
+    url: "https://www.manimancer.fun",
+    siteName: "Manimancer",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Manimancer - AI-powered 2D animation generator",
+      },
+    ],
+    locale: "en_US",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Manimancer",
+    description: "Generate 2D animations from text prompts using AI",
+    images: ["/og-image.png"],
+  },
 };
 
 import { ThemeProvider } from "@/components/ThemeProvider";
