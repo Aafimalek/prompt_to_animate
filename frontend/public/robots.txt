@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /
+
+# Sitemap location
+Sitemap: https://www.manimancer.fun/sitemap.xml
+
+# Crawl delay (optional - be nice to servers)
+Crawl-delay: 1
+
+# Disallow temporary/system paths
+Disallow: /api/
+Disallow: /_next/
+Disallow: /sign-in*
+Disallow: /sign-up*

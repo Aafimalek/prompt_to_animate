@@ -236,7 +236,7 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
     };
 
     return (
-        <div className="w-full max-w-3xl mx-auto px-6 min-h-full flex flex-col justify-center py-8">
+        <div className="w-full max-w-3xl mx-auto px-4 md:px-6 min-h-full flex flex-col justify-center py-6 md:py-8">
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -244,10 +244,10 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
                 className="text-center mb-10 flex flex-col items-center"
             >
 
-                <h1 className="text-4xl md:text-5xl font-bold tracking-tight mb-4 bg-gradient-to-r from-orange-500 via-orange-600 to-orange-500 bg-clip-text text-transparent font-display">
+                <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight mb-3 md:mb-4 bg-gradient-to-r from-orange-500 via-orange-600 to-orange-500 bg-clip-text text-transparent font-display">
                     Manimancer
                 </h1>
-                <p className="text-lg text-muted-foreground max-w-lg mx-auto">
+                <p className="text-base md:text-lg text-muted-foreground max-w-lg mx-auto px-2">
                     Turn your concepts into beautiful visualizations. Describe it, and watch the magic happen.
                 </p>
             </motion.div>
@@ -259,13 +259,13 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
                 transition={{ duration: 0.6, delay: 0.1 }}
                 className="w-full space-y-4"
             >
-                <div className="relative group rounded-3xl transition-all duration-300 shadow-2xl shadow-zinc-200/50 dark:shadow-black/50 border border-white/20 dark:border-zinc-800/50 active:scale-[0.99] duration-200">
-                    <div className="bg-white/60 dark:bg-zinc-900/60 backdrop-blur-2xl rounded-3xl p-5 flex flex-col gap-4 ring-1 ring-black/5 dark:ring-white/5">
+                <div className="relative group rounded-2xl md:rounded-3xl transition-all duration-300 shadow-2xl shadow-zinc-200/50 dark:shadow-black/50 border border-white/20 dark:border-zinc-800/50 active:scale-[0.99] duration-200">
+                    <div className="bg-white/60 dark:bg-zinc-900/60 backdrop-blur-2xl rounded-2xl md:rounded-3xl p-3 sm:p-4 md:p-5 flex flex-col gap-3 md:gap-4 ring-1 ring-black/5 dark:ring-white/5">
                         <textarea
                             value={prompt}
                             onChange={(e) => setPrompt(e.target.value)}
                             placeholder="Describe your animation... e.g. 'Visualize a sorting algorithm'"
-                            className="w-full bg-transparent text-lg placeholder:text-zinc-400 dark:placeholder:text-zinc-500 text-zinc-900 dark:text-zinc-100 p-2 focus:outline-none resize-none min-h-[100px] font-sans"
+                            className="w-full bg-transparent text-base md:text-lg placeholder:text-zinc-400 dark:placeholder:text-zinc-500 text-zinc-900 dark:text-zinc-100 p-1.5 md:p-2 focus:outline-none resize-none min-h-[80px] md:min-h-[100px] font-sans"
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter' && !e.shiftKey) {
                                     e.preventDefault();
@@ -274,205 +274,223 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
                             }}
                         />
 
-                        <div className="flex items-center justify-between gap-3 border-t border-zinc-100 dark:border-zinc-800 pt-3">
-                            {/* Custom Dropdown */}
-                            <div className="relative custom-dropdown-container z-50">
-                                <button
-                                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                                    className={cn(
-                                        "flex items-center space-x-2 px-4 py-2.5 rounded-full text-xs font-medium transition-all duration-200 border-2 select-none",
-                                        // Standard Colors
-                                        "bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100",
-                                        "border-zinc-200 dark:border-zinc-700",
-                                        // Hover & Open States
-                                        "hover:border-orange-500 hover:text-orange-600 dark:hover:text-orange-400",
-                                        isDropdownOpen && "border-orange-500 ring-2 ring-orange-500/20 text-orange-600 dark:text-orange-400"
-                                    )}
-                                >
-                                    <span>{length}</span>
-                                    <ChevronDown className={cn("w-3.5 h-3.5 transition-transform duration-200", isDropdownOpen && "rotate-180")} />
-                                </button>
+                        <div className="flex flex-wrap items-center justify-between gap-2 md:gap-3 border-t border-zinc-100 dark:border-zinc-800 pt-2 md:pt-3">
+                            {/* Controls Row - Dropdowns */}
+                            <div className="flex flex-wrap items-center gap-2">
+                                {/* Custom Dropdown */}
+                                <div className="relative custom-dropdown-container z-50">
+                                    <button
+                                        onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                                        className={cn(
+                                            "flex items-center space-x-1.5 md:space-x-2 px-3 md:px-4 py-2 md:py-2.5 rounded-full text-[11px] md:text-xs font-medium transition-all duration-200 border-2 select-none",
+                                            // Standard Colors
+                                            "bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100",
+                                            "border-zinc-200 dark:border-zinc-700",
+                                            // Hover & Open States
+                                            "hover:border-orange-500 hover:text-orange-600 dark:hover:text-orange-400",
+                                            isDropdownOpen && "border-orange-500 ring-2 ring-orange-500/20 text-orange-600 dark:text-orange-400"
+                                        )}
+                                    >
+                                        <span className="hidden xs:inline">{length}</span>
+                                        <span className="xs:hidden">{length.split(' ')[0]}</span>
+                                        <ChevronDown className={cn("w-3 md:w-3.5 h-3 md:h-3.5 transition-transform duration-200", isDropdownOpen && "rotate-180")} />
+                                    </button>
 
-                                <AnimatePresence>
-                                    {isDropdownOpen && (
-                                        <motion.div
-                                            initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                                            exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                                            transition={{ duration: 0.15, ease: "easeOut" }}
-                                            className="absolute bottom-full left-0 mb-2 w-40 p-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl shadow-xl overflow-hidden z-50 origin-bottom-left"
-                                        >
-                                            <div className="flex flex-col space-y-0.5">
-                                                {lengths.map((l) => (
-                                                    <button
-                                                        key={l}
-                                                        onClick={() => {
-                                                            setLength(l);
-                                                            setIsDropdownOpen(false);
-                                                        }}
-                                                        className={cn(
-                                                            "w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition-all flex items-center justify-between",
-                                                            length === l
-                                                                ? "bg-orange-500 text-white shadow-md shadow-orange-500/20"
-                                                                : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white"
-                                                        )}
-                                                    >
-                                                        {l}
-                                                        {length === l && <Wand2 className="w-3 h-3 text-white/90" />}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </motion.div>
-                                    )}
-                                </AnimatePresence>
-                            </div>
-
-                            {/* Resolution Dropdown */}
-                            <div className="relative resolution-dropdown-container z-40">
-                                <button
-                                    onClick={() => setIsResolutionDropdownOpen(!isResolutionDropdownOpen)}
-                                    className={cn(
-                                        "flex items-center space-x-2 px-4 py-2.5 rounded-full text-xs font-medium transition-all duration-200 border-2 select-none",
-                                        "bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100",
-                                        "border-zinc-200 dark:border-zinc-700",
-                                        "hover:border-orange-500 hover:text-orange-600 dark:hover:text-orange-400",
-                                        isResolutionDropdownOpen && "border-orange-500 ring-2 ring-orange-500/20 text-orange-600 dark:text-orange-400"
-                                    )}
-                                >
-                                    <Film className="w-3.5 h-3.5" />
-                                    <span>{RESOLUTIONS.find(r => r.id === resolution)?.label || resolution}</span>
-                                    <ChevronDown className={cn("w-3.5 h-3.5 transition-transform duration-200", isResolutionDropdownOpen && "rotate-180")} />
-                                </button>
-
-                                <AnimatePresence>
-                                    {isResolutionDropdownOpen && (
-                                        <motion.div
-                                            initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                                            exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                                            transition={{ duration: 0.15, ease: "easeOut" }}
-                                            className="absolute bottom-full left-0 mb-2 w-44 p-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl shadow-xl overflow-hidden z-50 origin-bottom-left"
-                                        >
-                                            <div className="flex flex-col space-y-0.5">
-                                                {RESOLUTIONS.map((r) => {
-                                                    const isLocked = !canAccessResolution(r.minTier);
-                                                    const isSelected = resolution === r.id;
-
-                                                    return (
+                                    <AnimatePresence>
+                                        {isDropdownOpen && (
+                                            <motion.div
+                                                initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                                                transition={{ duration: 0.15, ease: "easeOut" }}
+                                                className="absolute bottom-full left-0 mb-2 w-40 p-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl shadow-xl overflow-hidden z-50 origin-bottom-left"
+                                            >
+                                                <div className="flex flex-col space-y-0.5">
+                                                    {lengths.map((l) => (
                                                         <button
-                                                            key={r.id}
+                                                            key={l}
                                                             onClick={() => {
-                                                                if (!isLocked) {
-                                                                    setResolution(r.id);
-                                                                    setIsResolutionDropdownOpen(false);
-                                                                }
+                                                                setLength(l);
+                                                                setIsDropdownOpen(false);
                                                             }}
-                                                            disabled={isLocked}
                                                             className={cn(
                                                                 "w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition-all flex items-center justify-between",
-                                                                isSelected && !isLocked
+                                                                length === l
                                                                     ? "bg-orange-500 text-white shadow-md shadow-orange-500/20"
-                                                                    : isLocked
-                                                                        ? "text-zinc-400 dark:text-zinc-600 cursor-not-allowed"
-                                                                        : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white"
+                                                                    : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white"
                                                             )}
                                                         >
-                                                            <span className="flex items-center gap-2">
-                                                                {isLocked && <Lock className="w-3 h-3" />}
-                                                                {r.label}
-                                                            </span>
-                                                            <span className="flex items-center gap-1">
-                                                                {r.costLabel && <span className="text-[10px] opacity-70">{r.costLabel}</span>}
-                                                                {isSelected && !isLocked && <Check className="w-3 h-3 text-white/90" />}
-                                                            </span>
+                                                            {l}
+                                                            {length === l && <Wand2 className="w-3 h-3 text-white/90" />}
                                                         </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        </motion.div>
-                                    )}
-                                </AnimatePresence>
+                                                    ))}
+                                                </div>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
+
+                                {/* Resolution Dropdown */}
+                                <div className="relative resolution-dropdown-container z-40">
+                                    <button
+                                        onClick={() => setIsResolutionDropdownOpen(!isResolutionDropdownOpen)}
+                                        className={cn(
+                                            "flex items-center space-x-1.5 md:space-x-2 px-3 md:px-4 py-2 md:py-2.5 rounded-full text-[11px] md:text-xs font-medium transition-all duration-200 border-2 select-none",
+                                            "bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100",
+                                            "border-zinc-200 dark:border-zinc-700",
+                                            "hover:border-orange-500 hover:text-orange-600 dark:hover:text-orange-400",
+                                            isResolutionDropdownOpen && "border-orange-500 ring-2 ring-orange-500/20 text-orange-600 dark:text-orange-400"
+                                        )}
+                                    >
+                                        <Film className="w-3 md:w-3.5 h-3 md:h-3.5" />
+                                        <span className="hidden sm:inline">{RESOLUTIONS.find(r => r.id === resolution)?.label || resolution}</span>
+                                        <span className="sm:hidden">{resolution}</span>
+                                        <ChevronDown className={cn("w-3 md:w-3.5 h-3 md:h-3.5 transition-transform duration-200", isResolutionDropdownOpen && "rotate-180")} />
+                                    </button>
+
+                                    <AnimatePresence>
+                                        {isResolutionDropdownOpen && (
+                                            <motion.div
+                                                initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                                                transition={{ duration: 0.15, ease: "easeOut" }}
+                                                className="absolute bottom-full left-0 mb-2 w-44 p-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl shadow-xl overflow-hidden z-50 origin-bottom-left"
+                                            >
+                                                <div className="flex flex-col space-y-0.5">
+                                                    {RESOLUTIONS.map((r) => {
+                                                        const isLocked = !canAccessResolution(r.minTier);
+                                                        const isSelected = resolution === r.id;
+
+                                                        return (
+                                                            <button
+                                                                key={r.id}
+                                                                onClick={() => {
+                                                                    if (!isLocked) {
+                                                                        setResolution(r.id);
+                                                                        setIsResolutionDropdownOpen(false);
+                                                                    }
+                                                                }}
+                                                                disabled={isLocked}
+                                                                className={cn(
+                                                                    "w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition-all flex items-center justify-between",
+                                                                    isSelected && !isLocked
+                                                                        ? "bg-orange-500 text-white shadow-md shadow-orange-500/20"
+                                                                        : isLocked
+                                                                            ? "text-zinc-400 dark:text-zinc-600 cursor-not-allowed"
+                                                                            : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white"
+                                                                )}
+                                                            >
+                                                                <span className="flex items-center gap-2">
+                                                                    {isLocked && <Lock className="w-3 h-3" />}
+                                                                    {r.label}
+                                                                </span>
+                                                                <span className="flex items-center gap-1">
+                                                                    {r.costLabel && <span className="text-[10px] opacity-70">{r.costLabel}</span>}
+                                                                    {isSelected && !isLocked && <Check className="w-3 h-3 text-white/90" />}
+                                                                </span>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
                             </div>
 
-                            {/* Usage Display */}
-                            {usage && isSignedIn && (
-                                <div className="flex items-center gap-2">
-                                    {/* Plan Badge */}
-                                    <div className={cn(
-                                        "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium",
-                                        usage.tier === 'pro'
-                                            ? "bg-gradient-to-r from-orange-500 to-orange-600 text-white"
-                                            : usage.basic_credits > 0
-                                                ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                                                : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400"
-                                    )}>
-                                        {usage.tier === 'pro' ? (
-                                            <Crown className="w-3 h-3" />
-                                        ) : usage.basic_credits > 0 ? (
-                                            <Zap className="w-3 h-3" />
-                                        ) : (
-                                            <Sparkles className="w-3 h-3" />
-                                        )}
-                                        <span>
-                                            {usage.tier === 'pro'
-                                                ? `Pro: ${usage.remaining}/${usage.limit}`
+                            {/* Right side: Usage Display + Generate - wrapped for mobile */}
+                            <div className="flex flex-wrap items-center gap-2 ml-auto">
+                                {/* Usage Display */}
+                                {usage && isSignedIn && (
+                                    <div className="flex items-center gap-1.5 md:gap-2">
+                                        {/* Plan Badge */}
+                                        <div className={cn(
+                                            "flex items-center gap-1 md:gap-1.5 px-2 md:px-3 py-1 md:py-1.5 rounded-full text-[10px] md:text-xs font-medium",
+                                            usage.tier === 'pro'
+                                                ? "bg-gradient-to-r from-orange-500 to-orange-600 text-white"
                                                 : usage.basic_credits > 0
-                                                    ? `${usage.basic_credits} credits left`
-                                                    : `${usage.used}/${usage.limit} used`
-                                            }
-                                        </span>
+                                                    ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                                                    : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400"
+                                        )}>
+                                            {usage.tier === 'pro' ? (
+                                                <Crown className="w-2.5 md:w-3 h-2.5 md:h-3" />
+                                            ) : usage.basic_credits > 0 ? (
+                                                <Zap className="w-2.5 md:w-3 h-2.5 md:h-3" />
+                                            ) : (
+                                                <Sparkles className="w-2.5 md:w-3 h-2.5 md:h-3" />
+                                            )}
+                                            <span className="hidden sm:inline">
+                                                {usage.tier === 'pro'
+                                                    ? `Pro: ${usage.remaining}/${usage.limit}`
+                                                    : usage.basic_credits > 0
+                                                        ? `${usage.basic_credits} credits`
+                                                        : `${usage.used}/${usage.limit}`
+                                                }
+                                            </span>
+                                            <span className="sm:hidden">
+                                                {usage.tier === 'pro'
+                                                    ? `${usage.remaining}/${usage.limit}`
+                                                    : usage.basic_credits > 0
+                                                        ? `${usage.basic_credits}`
+                                                        : `${usage.remaining}`
+                                                }
+                                            </span>
+                                        </div>
+
+                                        {/* Upgrade Button for Free users - hidden on very small screens */}
+                                        {usage.tier === 'free' && usage.basic_credits === 0 && onUpgradeClick && (
+                                            <button
+                                                onClick={onUpgradeClick}
+                                                className="hidden xs:block text-[10px] md:text-xs font-medium text-orange-500 hover:text-orange-600 hover:underline"
+                                            >
+                                                Upgrade
+                                            </button>
+                                        )}
                                     </div>
+                                )}
 
-                                    {/* Upgrade Button for Free users */}
-                                    {usage.tier === 'free' && usage.basic_credits === 0 && onUpgradeClick && (
-                                        <button
-                                            onClick={onUpgradeClick}
-                                            className="text-xs font-medium text-orange-500 hover:text-orange-600 hover:underline"
-                                        >
-                                            Upgrade
-                                        </button>
-                                    )}
-                                </div>
-                            )}
-
-                            {isSignedIn ? (
-                                <motion.button
-                                    onClick={handleGenerate}
-                                    disabled={loading || !prompt}
-                                    whileHover={{ scale: 1.05 }}
-                                    whileTap={{ scale: 0.95 }}
-                                    className={cn(
-                                        "px-5 py-2.5 rounded-xl font-medium transition-all flex items-center space-x-2 border-2",
-                                        loading || !prompt
-                                            ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-400 border-zinc-200 dark:border-zinc-700 cursor-not-allowed"
-                                            : [
-                                                "bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-zinc-900 dark:border-white shadow-lg",
-                                                "hover:bg-white dark:hover:bg-zinc-900",
-                                                "hover:text-orange-600 dark:hover:text-orange-400",
-                                                "hover:border-orange-500 dark:hover:border-orange-500",
-                                                "hover:shadow-orange-500/20"
-                                            ].join(" ")
-                                    )}
-                                >
-                                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-                                    <span>{loading ? 'Conjuring...' : 'Generate'}</span>
-                                </motion.button>
-                            ) : (
-                                <SignInButton mode="modal">
+                                {isSignedIn ? (
                                     <motion.button
+                                        onClick={handleGenerate}
+                                        disabled={loading || !prompt}
                                         whileHover={{ scale: 1.05 }}
                                         whileTap={{ scale: 0.95 }}
                                         className={cn(
-                                            "px-5 py-2.5 rounded-xl font-medium transition-all flex items-center space-x-2 border-2",
-                                            "bg-orange-500 text-white border-orange-500 shadow-lg shadow-orange-500/20",
-                                            "hover:bg-orange-600 hover:border-orange-600"
+                                            "px-3 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl font-medium transition-all flex items-center space-x-1.5 md:space-x-2 border-2 text-sm md:text-base",
+                                            loading || !prompt
+                                                ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-400 border-zinc-200 dark:border-zinc-700 cursor-not-allowed"
+                                                : [
+                                                    "bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-zinc-900 dark:border-white shadow-lg",
+                                                    "hover:bg-white dark:hover:bg-zinc-900",
+                                                    "hover:text-orange-600 dark:hover:text-orange-400",
+                                                    "hover:border-orange-500 dark:hover:border-orange-500",
+                                                    "hover:shadow-orange-500/20"
+                                                ].join(" ")
                                         )}
                                     >
-                                        <LogIn className="w-4 h-4" />
-                                        <span>Sign in to Generate</span>
+                                        {loading ? <Loader2 className="w-3.5 md:w-4 h-3.5 md:h-4 animate-spin" /> : <Wand2 className="w-3.5 md:w-4 h-3.5 md:h-4" />}
+                                        <span className="hidden xs:inline">{loading ? 'Conjuring...' : 'Generate'}</span>
+                                        <span className="xs:hidden">{loading ? '...' : 'Go'}</span>
                                     </motion.button>
-                                </SignInButton>
-                            )}
+                                ) : (
+                                    <SignInButton mode="modal">
+                                        <motion.button
+                                            whileHover={{ scale: 1.05 }}
+                                            whileTap={{ scale: 0.95 }}
+                                            className={cn(
+                                                "px-3 md:px-5 py-2 md:py-2.5 rounded-lg md:rounded-xl font-medium transition-all flex items-center space-x-1.5 md:space-x-2 border-2 text-sm md:text-base",
+                                                "bg-orange-500 text-white border-orange-500 shadow-lg shadow-orange-500/20",
+                                                "hover:bg-orange-600 hover:border-orange-600"
+                                            )}
+                                        >
+                                            <LogIn className="w-3.5 md:w-4 h-3.5 md:h-4" />
+                                            <span className="hidden xs:inline">Sign in to Generate</span>
+                                            <span className="xs:hidden">Sign in</span>
+                                        </motion.button>
+                                    </SignInButton>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>

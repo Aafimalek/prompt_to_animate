@@ -2,6 +2,9 @@
 @variant dark (&:where(.dark, .dark *));
 
 @theme {
+  /* Custom Breakpoints for mobile responsiveness */
+  --breakpoint-xs: 400px;
+
   /* Fonts */
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);

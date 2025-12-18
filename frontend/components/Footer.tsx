@@ -21,28 +21,28 @@ export function Footer({ isDesktopCollapsed = true }: FooterProps) {
                     : "left-4 right-4 md:left-[304px] md:right-4"
             )}
         >
-            <div className="max-w-fit mx-auto flex items-center justify-center space-x-4 bg-white/70 dark:bg-zinc-900/70 backdrop-blur-2xl border border-white/20 dark:border-zinc-800/50 rounded-full shadow-2xl shadow-zinc-200/50 dark:shadow-black/40 px-6 py-2.5 pointer-events-auto ring-1 ring-black/5 dark:ring-white/10">
+            <div className="max-w-fit mx-auto flex items-center justify-center space-x-2 sm:space-x-4 bg-white/70 dark:bg-zinc-900/70 backdrop-blur-2xl border border-white/20 dark:border-zinc-800/50 rounded-full shadow-2xl shadow-zinc-200/50 dark:shadow-black/40 px-3 sm:px-6 py-2 sm:py-2.5 pointer-events-auto ring-1 ring-black/5 dark:ring-white/10">
 
                 {/* Copyright */}
-                <span className="text-sm text-zinc-600 dark:text-zinc-400">© {new Date().getFullYear()} <span className="text-orange-500 font-medium">Manimancer</span></span>
+                <span className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400">© {new Date().getFullYear()} <span className="text-orange-500 font-medium">Manimancer</span></span>
 
-                <span className="text-zinc-300 dark:text-zinc-700">•</span>
+                <span className="hidden xs:inline text-zinc-300 dark:text-zinc-700">•</span>
 
                 {/* Made with love */}
-                <div className="flex items-center space-x-1.5 text-sm text-zinc-600 dark:text-zinc-400">
-                    <span>Made with</span>
+                <div className="hidden xs:flex items-center space-x-1.5 text-sm text-zinc-600 dark:text-zinc-400">
+                    <span className="hidden sm:inline">Made with</span>
                     <Heart className="w-3.5 h-3.5 text-orange-500 fill-orange-500" />
                 </div>
 
-                <span className="text-zinc-300 dark:text-zinc-700">•</span>
+                <span className="hidden sm:inline text-zinc-300 dark:text-zinc-700">•</span>
 
                 {/* Social Icons */}
-                <div className="flex items-center space-x-1">
-                    <a href="https://github.com/Aafimalek" target="_blank" rel="noopener noreferrer" className="p-1.5 text-zinc-500 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-all">
-                        <Github className="w-4 h-4" />
+                <div className="flex items-center space-x-0.5 sm:space-x-1">
+                    <a href="https://github.com/Aafimalek" target="_blank" rel="noopener noreferrer" className="p-1 sm:p-1.5 text-zinc-500 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-all">
+                        <Github className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
                     </a>
-                    <a href="https://x.com/aafimalek2032" target="_blank" rel="noopener noreferrer" className="p-1.5 text-zinc-500 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-all">
-                        <Twitter className="w-4 h-4" />
+                    <a href="https://x.com/aafimalek2032" target="_blank" rel="noopener noreferrer" className="p-1 sm:p-1.5 text-zinc-500 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-all">
+                        <Twitter className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
                     </a>
                 </div>
             </div>

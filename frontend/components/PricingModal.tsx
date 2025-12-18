@@ -97,15 +97,15 @@ export function PricingModal({ isOpen, onClose }: PricingModalProps) {
                         animate={{ opacity: 1, scale: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95, y: 10 }}
                         transition={{ type: "spring", duration: 0.4 }}
-                        className="fixed inset-0 z-[101] flex items-center justify-center p-4 md:p-8"
+                        className="fixed inset-0 z-[101] flex items-center justify-center p-3 sm:p-4 md:p-8 overflow-y-auto"
                     >
                         <div className={cn(
-                            "w-full max-w-4xl relative",
+                            "w-full max-w-4xl relative my-auto",
                             "bg-white/95 dark:bg-zinc-900/95 backdrop-blur-2xl",
                             "border border-white/20 dark:border-zinc-800/50",
-                            "rounded-2xl shadow-2xl shadow-zinc-200/50 dark:shadow-black/50",
+                            "rounded-xl sm:rounded-2xl shadow-2xl shadow-zinc-200/50 dark:shadow-black/50",
                             "ring-1 ring-black/5 dark:ring-white/5",
-                            "p-5 md:p-8"
+                            "p-4 sm:p-5 md:p-8 max-h-[95vh] overflow-y-auto"
                         )}>
                             {/* Close Button */}
                             <button
@@ -116,22 +116,22 @@ export function PricingModal({ isOpen, onClose }: PricingModalProps) {
                             </button>
 
                             {/* Header - Compact */}
-                            <div className="text-center mb-6">
-                                <div className="flex items-center justify-center gap-3 mb-2">
-                                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 shadow-lg shadow-orange-500/30 flex items-center justify-center">
-                                        <Crown className="w-5 h-5 text-white" />
+                            <div className="text-center mb-4 sm:mb-6">
+                                <div className="flex items-center justify-center gap-2 sm:gap-3 mb-2">
+                                    <div className="w-8 sm:w-10 h-8 sm:h-10 rounded-lg sm:rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 shadow-lg shadow-orange-500/30 flex items-center justify-center">
+                                        <Crown className="w-4 sm:w-5 h-4 sm:h-5 text-white" />
                                     </div>
-                                    <h2 className="text-2xl md:text-3xl font-bold tracking-tight bg-gradient-to-r from-orange-500 via-orange-600 to-orange-500 bg-clip-text text-transparent">
+                                    <h2 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight bg-gradient-to-r from-orange-500 via-orange-600 to-orange-500 bg-clip-text text-transparent">
                                         Choose Your Plan
                                     </h2>
                                 </div>
-                                <p className="text-sm text-muted-foreground">
+                                <p className="text-xs sm:text-sm text-muted-foreground">
                                     Unlock the full power of Manimancer
                                 </p>
                             </div>
 
                             {/* Pricing Cards - Compact Grid */}
-                            <div className="grid md:grid-cols-3 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
                                 {pricingTiers.map((tier, index) => (
                                     <motion.div
                                         key={tier.name}

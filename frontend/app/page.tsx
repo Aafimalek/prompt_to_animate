@@ -7,6 +7,7 @@ import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
 import { AnimationGenerator } from '@/components/AnimationGenerator';
 import { PricingModal } from '@/components/PricingModal';
+import { AdSense } from '@/components/AdSense';
 import { cn } from '@/lib/utils';
 import { useUser } from '@clerk/nextjs';
 import { getUserChats, deleteChat, Chat, API_BASE_URL } from '@/lib/api';
@@ -25,6 +26,7 @@ function HomeContent() {
   const [paymentMessage, setPaymentMessage] = useState('Credits added to your account');
   const [usageRefreshTrigger, setUsageRefreshTrigger] = useState(0);
   const [userTier, setUserTier] = useState<string>('free');
+  const [basicCredits, setBasicCredits] = useState<number>(0);
 
   // Fetch user tier on mount and when usageRefreshTrigger changes
   useEffect(() => {
@@ -35,6 +37,7 @@ function HomeContent() {
           if (response.ok) {
             const data = await response.json();
             setUserTier(data.tier || 'free');
+            setBasicCredits(data.basic_credits || 0);
           }
         } catch (error) {
           console.error('Failed to fetch user tier:', error);
@@ -219,6 +222,9 @@ function HomeContent() {
 
       {/* Pricing Modal */}
       <PricingModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
+
+      {/* Google AdSense - Only loads for free users */}
+      <AdSense userTier={userTier} basicCredits={basicCredits} />
 
       {/* Payment Success Toast */}
       {paymentSuccess && (
