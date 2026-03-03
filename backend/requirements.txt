@@ -6,6 +6,7 @@ python-dotenv>=1.0.0
 
 # LLM and AI
 langchain-groq>=0.1.0
+langchain-openai>=0.1.0
 langchain-core>=0.1.0
 
 # AWS Services

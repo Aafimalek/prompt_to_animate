@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Wand2, ChevronDown, Download, Loader2, Code, Share2, Check, Sparkles, Film, Package, LogIn, Crown, Zap, Lock } from 'lucide-react';
+import { Wand2, ChevronDown, Download, Loader2, Code, Share2, Check, Sparkles, Film, LogIn, Crown, Zap, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { HistoryItem } from './Sidebar';
@@ -32,10 +32,10 @@ interface UsageInfo {
 
 const PROGRESS_STEPS = [
     { id: 1, label: 'Analyzing Prompt', icon: Sparkles },
-    { id: 2, label: 'Generating Code', icon: Code },
-    { id: 3, label: 'Code Ready', icon: Check },
-    { id: 4, label: 'Rendering Frames', icon: Film },
-    { id: 5, label: 'Finalizing Video', icon: Package },
+    { id: 2, label: 'Composing Scenes', icon: Sparkles },
+    { id: 3, label: 'Generating Code', icon: Code },
+    { id: 4, label: 'Validating Code', icon: Check },
+    { id: 5, label: 'Rendering & Finalizing', icon: Film },
     { id: 6, label: 'Complete', icon: Check },
 ];
 
@@ -604,15 +604,18 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
 
                                 {/* Fun Message */}
                                 <motion.p
-                                    key={currentProgress?.step}
+                                    key={`${currentProgress?.step}-${currentProgress?.status}`}
                                     initial={{ opacity: 0, y: 10 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     className="text-center text-sm text-muted-foreground mt-4"
                                 >
-                                    {currentProgress?.step === 2 && "✨ The AI is crafting your animation..."}
-                                    {currentProgress?.step === 4 && "🎬 Rendering beautiful frames..."}
-                                    {currentProgress?.step === 5 && "📦 Almost there! Packaging your video..."}
-                                    {(!currentProgress || currentProgress.step <= 1) && "🔮 Preparing the magic..."}
+                                    {currentProgress?.step === 2 && "Composing a scene-by-scene plan..."}
+                                    {currentProgress?.step === 3 && "Generating Manim code from the plan..."}
+                                    {currentProgress?.step === 4 && currentProgress?.status === "repairing" && "Repairing code issues automatically..."}
+                                    {currentProgress?.step === 4 && currentProgress?.status !== "repairing" && "Running strict code validation..."}
+                                    {currentProgress?.step === 5 && currentProgress?.status === "rendering" && "Rendering animation frames..."}
+                                    {currentProgress?.step === 5 && currentProgress?.status === "finalizing" && "Uploading and finalizing your video..."}
+                                    {(!currentProgress || currentProgress.step <= 1) && "Preparing generation pipeline..."}
                                 </motion.p>
                             </div>
                         )}

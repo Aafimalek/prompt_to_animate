@@ -8,6 +8,7 @@ real-time SSE streaming to the frontend.
 
 import json
 import asyncio
+import os
 from datetime import datetime
 from typing import Optional
 from redis import Redis
@@ -77,22 +78,78 @@ def process_video_generation(
         asyncio.set_event_loop(loop)
         
         try:
-            # Step 2: Generating code
-            report_progress(redis_conn, job_id, 2, "generating", "Generating Manim code...")
+            # Step 2-4: Compose, generate, validate (+repair if needed)
+            report_progress(redis_conn, job_id, 2, "composing", "Composing internal scene plan...")
             
-            from .llm_service import generate_manim_code
-            code = loop.run_until_complete(generate_manim_code(prompt, length))
-            
-            # Step 3: Code ready
-            report_progress(redis_conn, job_id, 3, "code_ready", "Code generated successfully!")
-            
-            # Step 4: Rendering animation
-            report_progress(redis_conn, job_id, 4, "rendering", f"Rendering at {resolution}...")
+            from .llm_service import generate_manim_code, repair_code_from_runtime_error
+
+            def llm_progress(status: str, message: str) -> None:
+                step_map = {
+                    "composing": 2,
+                    "generating": 3,
+                    "validating": 4,
+                    "repairing": 4,
+                    "repairing_runtime": 4,
+                }
+                step = step_map.get(status, 4)
+                report_progress(redis_conn, job_id, step, status, message)
+
+            code = loop.run_until_complete(
+                generate_manim_code(prompt, length, progress_callback=llm_progress)
+            )
             
             from .manim_service import execute_manim_code
-            s3_key, local_filename = execute_manim_code(code, resolution=resolution)
+            max_render_repairs_raw = os.environ.get("MANIM_RENDER_REPAIR_ATTEMPTS", "1")
+            try:
+                max_render_repairs = max(0, int(max_render_repairs_raw))
+            except ValueError:
+                max_render_repairs = 1
+
+            render_attempt = 0
+            while True:
+                # Step 5: Rendering animation
+                if max_render_repairs > 0:
+                    attempt_label = f" (attempt {render_attempt + 1}/{max_render_repairs + 1})"
+                else:
+                    attempt_label = ""
+                report_progress(
+                    redis_conn,
+                    job_id,
+                    5,
+                    "rendering",
+                    f"Rendering at {resolution}{attempt_label}...",
+                )
+
+                try:
+                    s3_key, local_filename = execute_manim_code(code, resolution=resolution)
+                    break
+                except Exception as render_error:
+                    render_error_text = str(render_error)
+                    can_attempt_repair = (
+                        render_attempt < max_render_repairs
+                        and render_error_text.startswith("Code error")
+                    )
+                    if not can_attempt_repair:
+                        raise
+
+                    render_attempt += 1
+                    report_progress(
+                        redis_conn,
+                        job_id,
+                        4,
+                        "repairing_runtime",
+                        f"Render failed; repairing code (attempt {render_attempt}/{max_render_repairs})...",
+                    )
+                    code = loop.run_until_complete(
+                        repair_code_from_runtime_error(
+                            prompt=prompt,
+                            length=length,
+                            bad_code=code,
+                            runtime_error=render_error_text,
+                        )
+                    )
             
-            # Step 5: Uploading to cloud
+            # Step 5: Uploading/finalizing
             report_progress(redis_conn, job_id, 5, "finalizing", "Uploading to cloud storage...")
             
             # Generate signed URL

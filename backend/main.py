@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Optional, Tuple
 from datetime import datetime
 from bson import ObjectId
 from uuid import uuid4
@@ -21,7 +21,7 @@ from .tasks import process_video_generation
 from .s3_service import generate_cloudfront_signed_url
 from .database import connect_to_mongo, close_mongo_connection, get_chats_collection
 from .models import ChatResponse, ChatListResponse
-from .user_service import check_can_generate, increment_usage, get_user_usage, add_basic_credits, set_pro_subscription
+from .user_service import check_can_generate, get_user_usage, add_basic_credits, set_pro_subscription
 
 
 @asynccontextmanager
@@ -59,6 +59,29 @@ class AnimationRequest(BaseModel):
 class AnimationResponse(BaseModel):
     video_url: str
     code: str
+
+
+def progress_signature(progress: dict) -> Tuple[int, str, str]:
+    """Build a comparable signature used to decide SSE emission."""
+    return (
+        int(progress.get("step", 0)),
+        str(progress.get("status", "")),
+        str(progress.get("message", "")),
+    )
+
+
+def should_emit_progress(
+    last_signature: Optional[Tuple[int, str, str]],
+    progress: dict
+) -> Tuple[bool, Tuple[int, str, str]]:
+    """
+    Return whether this progress update should be emitted.
+
+    We emit when any of (step, status, message) changes so same-step
+    phase updates are streamed to clients.
+    """
+    signature = progress_signature(progress)
+    return signature != last_signature, signature
 
 
 @app.post("/generate", response_model=AnimationResponse)
@@ -172,7 +195,7 @@ async def generate_animation_stream(request: AnimationRequest):
             print(f"📤 Enqueued job {job_id} for user {request.clerk_id}")
             
             # Poll for progress updates
-            last_step = 0
+            last_signature: Optional[Tuple[int, str, str]] = None
             max_polls = 1200  # 10 minutes max (1200 * 0.5s = 600s)
             poll_count = 0
             
@@ -186,14 +209,16 @@ async def generate_animation_stream(request: AnimationRequest):
                 if progress_data:
                     progress = json.loads(progress_data)
                     current_step = progress.get("step", 0)
+                    current_status = progress.get("status", "")
                     
-                    # Only yield if we have a new step
-                    if current_step != last_step or current_step in [-1, 6]:
+                    # Emit if step/status/message changed
+                    should_emit, signature = should_emit_progress(last_signature, progress)
+                    if should_emit:
                         yield f"data: {json.dumps(progress)}\n\n"
-                        last_step = current_step
+                        last_signature = signature
                         
                         # Check if job is complete or failed
-                        if current_step == 6 or current_step == -1:
+                        if current_status == "complete" or current_step == -1:
                             break
                 
                 # Check job status directly

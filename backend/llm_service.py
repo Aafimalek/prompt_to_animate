@@ -1,709 +1,1177 @@
+import ast
+import asyncio
+import json
 import os
-from langchain_groq import ChatGroq
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from dotenv import load_dotenv
+import random
+import re
+from functools import lru_cache
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+
+from dotenv import load_dotenv
+import groq
+import httpx
+from langchain_core.messages import SystemMessage
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
+import openai as openai_mod
 
 # Load .env from project root
 env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
-# Ensure API Key is set
-api_key = os.environ.get("GROQ_API_KEY")
-if not api_key:
+# Groq (primary)
+groq_api_key = os.environ.get("GROQ_API_KEY", "").strip()
+if not groq_api_key:
     print(f"Warning: GROQ_API_KEY not found in environment. Checked path: {env_path}")
+DEFAULT_GROQ_MODEL = "moonshotai/kimi-k2-instruct-0905"
 
-llm = ChatGroq(
-    model="moonshotai/kimi-k2-instruct-0905", 
-    api_key=api_key,
-    temperature=0.2  # Slightly higher for creativity, but still focused
+# Cerebras (fallback)
+cerebras_api_key = os.environ.get("CEREBRAS_API_KEY", "").strip()
+CEREBRAS_BASE_URL = os.environ.get("CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1").strip()
+DEFAULT_CEREBRAS_MODEL = "qwen-3-235b-a22b-instruct-2507"
+
+PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
+PROMPT_FILES = {
+    "composer_system": "composer_system.md",
+    "codegen_system": "codegen_system.md",
+    "repair_system": "repair_system.md",
+    "length_profiles": "length_profiles.json",
+}
+
+SCENE_PLAN_REQUIRED_KEYS = {"title", "hook", "narrative_arc", "scenes"}
+SCENE_REQUIRED_KEYS = {"name", "purpose", "duration_seconds", "visuals", "technical_notes"}
+ALLOWED_SCENE_BASES = {"Scene", "ThreeDScene", "MovingCameraScene"}
+FORBIDDEN_MATH_UNICODE = {
+    "\u00d7": "\\times",
+    "\u00f7": "\\div",
+    "\u03c0": "\\pi",
+    "\u2248": "\\approx",
+    "\u2211": "\\sum",
+    "\u221a": "\\sqrt",
+    "\u2264": "\\leq",
+    "\u2265": "\\geq",
+    "\u221e": "\\infty",
+    "\u03b8": "\\theta",
+}
+ANIMATION_FN_NAMES = {
+    "Create",
+    "Write",
+    "FadeIn",
+    "FadeOut",
+    "Transform",
+    "ReplacementTransform",
+    "TransformMatchingTex",
+    "TransformMatchingShapes",
+    "TransformFromCopy",
+    "DrawBorderThenFill",
+    "GrowFromCenter",
+    "GrowArrow",
+    "MoveToTarget",
+    "Indicate",
+    "Circumscribe",
+    "Flash",
+    "FlashAround",
+    "AnimationGroup",
+    "Succession",
+    "LaggedStart",
+    "Uncreate",
+    "ShrinkToCenter",
+    "Rotate",
+    "MoveAlongPath",
+}
+EXTERNAL_ASSET_MOBJECTS = {"SVGMobject", "ImageMobject"}
+FORBIDDEN_TEX_MACROS = {
+    r"\checkmark": "Text('OK')",
+}
+
+ProgressCallback = Optional[Callable[[str, str], None]]
+
+RETRYABLE_STATUS_CODES = {408, 409, 429, 500, 502, 503, 504}
+RUNTIME_REPAIR_SYSTEM_PROMPT = (
+    "You repair Manim Community Edition Python code that failed at render time.\n"
+    "Return executable code only, with no markdown fences or explanations.\n"
+    "Preserve the original educational intent, visual design, and length pacing requirements.\n\n"
+    "Common runtime fixes:\n"
+    "- COORDINATE DIMENSIONS: Manim uses 3D points everywhere. ALL coordinate arrays "
+    "MUST be 3D: np.array([x, y, 0]). NEVER pass 2D arrays like vec[:2] to Arrow, "
+    "Line, Dot, DashedLine, etc. get_center()/c2p() return 3D vectors; any manual "
+    "arrays combined with them must also be 3D. For scalar math (dot products, "
+    "projections) you may slice to 2D, but project the RESULT back to 3D before "
+    "passing to any Manim object: np.array([x, y, 0]).\n"
+    "- ANGLE CLASS: Angle(line1, line2, radius=0.5) — radius is keyword-only. "
+    "NEVER pass radius as a positional arg or you get 'multiple values' TypeError.\n"
+    "- RIGHTANGLE CLASS: RightAngle(line1, line2, length=0.2) — both lines MUST share "
+    "a common vertex point. length is keyword-only.\n"
+    "- Never pass raw mobjects to self.play(). Wrap with Create(), Write(), FadeIn(), or use .animate.\n"
+    "- Never use opacity=... as a constructor kwarg. Use fill_opacity= and stroke_opacity= instead.\n"
+    "- Always call self.set_camera_orientation() BEFORE adding 3D content in ThreeDScene.\n"
+    "- Use raw strings for LaTeX: MathTex(r'\\pi'), not MathTex('π').\n"
+    "- Use VGroup (not Group) for VMobject collections.\n"
+    "- Use .copy() when reusing a mobject that is already in the scene.\n"
+    "- ReplacementTransform(old, new) removes old; Transform(old, new) keeps old variable.\n"
+    "- Surface requires fill_opacity, not opacity.\n"
+    "- set_fill(color, opacity=val) is fine; but Mobject(opacity=val) is not.\n"
+    "- Keep minimum wait() calls per the length profile. Add self.wait(1) between sections if under budget."
 )
 
-# Detailed length guides with STRICT timing limits - 3BLUE1BROWN STYLE
-# NOTE: LLM consistently under-produces, so we DOUBLE the wait requirements
-LENGTH_GUIDE = {
-    "Medium (15s)": """
-⏱️ TARGET: EXACTLY 15-20 SECONDS. Count every second!
 
-MANDATORY TIME BUDGET (ADD THIS AS A CODE COMMENT):
-```python
-# TIME BUDGET:
-# Title: 3s (Write + wait(2))
-# Main Visual: 8s (Create + wait(2) + animate + wait(2) + wait(2))
-# Conclusion: 4s (Transform + wait(3))
-# TOTAL: 15s ✓
-```
+def _load_int_env(name: str, default: int, minimum: int) -> int:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError:
+        print(f"Warning: invalid integer for {name}='{raw_value}', using default {default}")
+        return default
+    return max(minimum, value)
 
-STRUCTURE (2 clear sections):
-1. Title card (3s): Write(title), wait(2)
-2. Main concept (12s): Create shapes, animate, multiple wait(2) calls
 
-TIMING COMMANDS YOU MUST USE:
-- self.wait(2) after EVERY major visual change
-- run_time=1.5 for animations
-- MINIMUM 6 wait() calls, each 2 seconds = 12+ seconds of pauses alone
+def _load_float_env(name: str, default: float, minimum: float) -> float:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    try:
+        value = float(raw_value)
+    except ValueError:
+        print(f"Warning: invalid float for {name}='{raw_value}', using default {default}")
+        return default
+    return max(minimum, value)
 
-VALIDATION: Your play() calls + wait() calls MUST add up to 15+ seconds.
-""",
-    
-    "Long (1m)": """
-⏱️ TARGET: EXACTLY 55-65 SECONDS. This is a FULL MINUTE video.
 
-⚠️ COMMON MISTAKE: Videos come out 30-40s. You MUST add more content and wait() calls!
+def _parse_fallback_models(raw_value: str) -> List[str]:
+    parsed: List[str] = []
+    seen: Set[str] = set()
+    for item in raw_value.split(","):
+        model_name = item.strip()
+        if not model_name or model_name in seen:
+            continue
+        parsed.append(model_name)
+        seen.add(model_name)
+    return parsed
 
-MANDATORY TIME BUDGET (ADD THIS AS A CODE COMMENT):
-```python
-# TIME BUDGET:
-# Section 1 - Title: 5s (Write + wait(3) + wait(2))
-# Section 2 - Intro Concept: 15s (multiple animations + wait(3)*5)  
-# Section 3 - Core Explanation: 20s (step-by-step + wait(3)*6)
-# Section 4 - Example: 15s (demo + wait(3)*4)
-# Section 5 - Summary: 10s (recap + wait(3)*3)
-# TOTAL: 65s ✓
-```
 
-STRUCTURE (5 sections, NOT 3):
-1. Title & Hook (5s)
-2. Introduction/Definition (15s) 
-3. Core Concept Explanation (20s)
-4. Visual Example/Demo (15s)
-5. Summary (10s)
+# Groq model candidates (primary)
+_primary_groq_model = (os.environ.get("GROQ_MODEL") or "").strip()
+PRIMARY_GROQ_MODEL = _primary_groq_model or DEFAULT_GROQ_MODEL
+FALLBACK_GROQ_MODELS = _parse_fallback_models(os.environ.get("GROQ_FALLBACK_MODELS", ""))
+if PRIMARY_GROQ_MODEL in FALLBACK_GROQ_MODELS:
+    FALLBACK_GROQ_MODELS = [m for m in FALLBACK_GROQ_MODELS if m != PRIMARY_GROQ_MODEL]
 
-TIMING COMMANDS:
-- MINIMUM 25 wait() calls throughout the video
-- Use wait(3) as your DEFAULT (not wait(1) or wait(2))
-- After EVERY text/shape appears: wait(3)
-- After EVERY transformation: wait(3)
-- run_time=2 for all major animations
+# Cerebras model candidates (fallback)
+_cerebras_model = (os.environ.get("CEREBRAS_MODEL") or "").strip()
+CEREBRAS_MODEL = _cerebras_model or DEFAULT_CEREBRAS_MODEL
 
-⚠️ SECTION CLEARING: At the END of each section, clear the screen:
-`self.play(FadeOut(*self.mobjects))`
+LLM_TEMPERATURE = _load_float_env("LLM_TEMPERATURE", default=0.2, minimum=0.0)
+LLM_RETRY_ATTEMPTS = _load_int_env("LLM_RETRY_ATTEMPTS", default=3, minimum=1)
+LLM_RETRY_BASE_SECONDS = _load_float_env("LLM_RETRY_BASE_SECONDS", default=1.0, minimum=0.1)
+LLM_RETRY_MAX_SECONDS = _load_float_env("LLM_RETRY_MAX_SECONDS", default=12.0, minimum=0.1)
+if LLM_RETRY_MAX_SECONDS < LLM_RETRY_BASE_SECONDS:
+    LLM_RETRY_MAX_SECONDS = LLM_RETRY_BASE_SECONDS
 
-VALIDATION: 25 wait(3) calls = 75 seconds of pauses. Add animations on top.
-""",
-    
-    "Deep Dive (2m)": """
-⏱️ TARGET: EXACTLY 110-130 SECONDS (2 full minutes).
+# Unified candidate list: Groq first, then Cerebras as rate-limit fallback
+MODEL_CANDIDATES: List[Tuple[str, str]] = [("groq", m) for m in [PRIMARY_GROQ_MODEL, *FALLBACK_GROQ_MODELS]]
+if cerebras_api_key:
+    MODEL_CANDIDATES.append(("cerebras", CEREBRAS_MODEL))
+else:
+    print("Info: CEREBRAS_API_KEY not set \u2013 Cerebras fallback disabled.")
 
-⚠️ CRITICAL: Your video MUST be at least 110 seconds. Count carefully!
 
-MANDATORY TIME BUDGET (ADD THIS EXACT COMMENT IN YOUR CODE):
-```python
-# TIME BUDGET - MUST TOTAL 120 SECONDS:
-# Section 1 - Title & Hook: 10s (title + hook visual + wait(3) + wait(3))
-# Section 2 - Definition: 20s (text reveals + diagram + wait(3)*6)
-# Section 3 - Mechanism Part A: 25s (step 1,2,3 + wait(3)*8)
-# Section 4 - Mechanism Part B: 25s (step 4,5,6 + wait(3)*8)
-# Section 5 - Visual Demo: 20s (animated walkthrough + wait(3)*6)
-# Section 6 - Summary: 20s (key points + final visual + wait(3)*6)
-# TOTAL: 120s ✓ (40+ wait calls × 3s average = 120s+)
-```
+@lru_cache(maxsize=16)
+def _get_llm_client(provider: str, model_name: str):
+    """Return a LangChain chat model for the given provider."""
+    if provider == "cerebras":
+        return ChatOpenAI(
+            model=model_name,
+            api_key=cerebras_api_key,
+            base_url=CEREBRAS_BASE_URL,
+            temperature=LLM_TEMPERATURE,
+        )
+    # Default: Groq
+    return ChatGroq(
+        model=model_name,
+        api_key=groq_api_key,
+        temperature=LLM_TEMPERATURE,
+    )
 
-MANDATORY STRUCTURE (6 substantial sections):
-1. Title & Hook (10s): Engaging title + hook question
-2. Definition (20s): What is this? Multiple reveals
-3. Mechanism Part A (25s): First half of how it works
-4. Mechanism Part B (25s): Second half, deeper
-5. Visual Demo (20s): Show it in action
-6. Summary (20s): Recap ALL key points
 
-TIMING COMMANDS (CRITICAL):
-- MINIMUM 40 wait() calls throughout
-- wait(3) is your DEFAULT - use it after EVERYTHING
-- Each section needs 6-8 wait() calls minimum
-- run_time=2.5 for main animations
-- Add wait(4) before transitions for extra breathing room
+# Backward compatibility for any direct imports/tests.
+llm = _get_llm_client("groq", PRIMARY_GROQ_MODEL)
 
-⚠️ SECTION CLEARING (PREVENT OVERLAP):
-- At the END of each section: `self.play(FadeOut(*self.mobjects))`
-- Start each new section with a CLEAN screen
 
-DO THE MATH: 40 waits × 3 seconds = 120 seconds minimum.
-""",
+def _is_retryable_llm_error(exc: Exception) -> bool:
+    if isinstance(
+        exc,
+        (
+            groq.InternalServerError,
+            groq.RateLimitError,
+            groq.APITimeoutError,
+            groq.APIConnectionError,
+            openai_mod.InternalServerError,
+            openai_mod.RateLimitError,
+            openai_mod.APITimeoutError,
+            openai_mod.APIConnectionError,
+            openai_mod.NotFoundError,
+            httpx.TimeoutException,
+            httpx.TransportError,
+        ),
+    ):
+        return True
 
-    "Extended (5m)": """
-⏱️ TARGET: EXACTLY 280-320 SECONDS (5 FULL MINUTES).
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int):
+        return status_code in RETRYABLE_STATUS_CODES or status_code >= 500
 
-⚠️ CRITICAL WARNING: Previous attempts only hit 150s. You need DOUBLE the content!
+    message = str(exc).lower()
+    transient_markers = (
+        "over capacity",
+        "temporarily unavailable",
+        "service unavailable",
+        "try again",
+        "timeout",
+    )
+    return any(marker in message for marker in transient_markers)
 
-THIS IS A UNIVERSITY MINI-LECTURE. Take your time. Explain thoroughly.
 
-MANDATORY TIME BUDGET (ADD THIS EXACT COMMENT IN YOUR CODE):
-```python
-# TIME BUDGET - MUST TOTAL 300 SECONDS (5 MINUTES):
-# Section 1 - Title & Hook: 15s (dramatic title + hook + wait(4)*3)
-# Section 2 - Why This Matters: 35s (context + motivation + wait(4)*8)
-# Section 3 - Prerequisites/Basics: 40s (foundation + wait(4)*10)
-# Section 4 - Core Concept Part A: 45s (first half explanation + wait(4)*11)
-# Section 5 - Core Concept Part B: 45s (second half + wait(4)*11)  
-# Section 6 - Detailed Visual Demo: 40s (walk through example + wait(4)*10)
-# Section 7 - Real Applications: 40s (2-3 examples + wait(4)*10)
-# Section 8 - Summary & Takeaways: 40s (comprehensive recap + wait(4)*10)
-# TOTAL: 300s ✓ (80+ wait calls = 320s of pauses alone!)
-```
+def _compute_retry_delay_seconds(attempt: int) -> float:
+    # Full-jitter backoff to avoid synchronized retries under provider load.
+    upper_bound = min(
+        LLM_RETRY_MAX_SECONDS,
+        LLM_RETRY_BASE_SECONDS * (2 ** max(0, attempt - 1)),
+    )
+    return random.uniform(0.0, upper_bound)
 
-MANDATORY STRUCTURE (8 FULL SECTIONS - NO SHORTCUTS):
-1. Title & Hook (15s): Dramatic entrance, pose a question
-2. Why This Matters (35s): Real-world impact, motivation  
-3. Prerequisites/Basics (40s): Foundation concepts needed
-4. Core Concept Part A (45s): Detailed first half
-5. Core Concept Part B (45s): Detailed second half
-6. Visual Demonstration (40s): Complete animated walkthrough
-7. Real Applications (40s): Multiple concrete examples
-8. Summary & Takeaways (40s): Recap EVERY major point
 
-TIMING COMMANDS (ABSOLUTELY REQUIRED):
-- MINIMUM 80 wait() calls (yes, eighty!)
-- wait(4) is your DEFAULT for this video length
-- Each section MUST have 8-12 wait() calls
-- run_time=3 for ALL major animations
-- Use wait(5) between sections for clear separation
-- Add self.wait(3) after EVERY single text or shape
+async def _invoke_with_resilience(
+    prompt_template: ChatPromptTemplate,
+    payload: Dict[str, Any],
+    operation: str,
+) -> str:
+    last_error: Optional[Exception] = None
+    total_candidates = len(MODEL_CANDIDATES)
 
-⚠️ SECTION CLEARING (CRITICAL FOR LONG VIDEOS):
-- At the END of EVERY section, ALWAYS clear the screen:
-  ```python
-  self.play(FadeOut(*self.mobjects))
-  self.wait(1)
-  ```
-- NEVER have text from one section still visible when next section starts
-- Before each new section: ensure screen is EMPTY, then add new content
+    for cand_index, (provider, model_name) in enumerate(MODEL_CANDIDATES, start=1):
+        chain = prompt_template | _get_llm_client(provider, model_name) | StrOutputParser()
 
-DO THE MATH: 80 waits × 4 seconds average = 320 seconds = 5+ minutes.
+        for attempt in range(1, LLM_RETRY_ATTEMPTS + 1):
+            try:
+                return await chain.ainvoke(payload)
+            except Exception as exc:
+                last_error = exc
+                if not _is_retryable_llm_error(exc):
+                    raise
 
-PACING: This should feel SLOW and RELAXED. Viewers need time to think.
-"""
+                on_last_attempt = attempt == LLM_RETRY_ATTEMPTS
+                on_last_candidate = cand_index == total_candidates
+                if on_last_attempt and on_last_candidate:
+                    break
+
+                if on_last_attempt:
+                    print(
+                        f"LLM {operation}: {provider}/{model_name} unavailable after "
+                        f"{LLM_RETRY_ATTEMPTS} attempts. Trying next model."
+                    )
+                    break
+
+                delay = _compute_retry_delay_seconds(attempt)
+                print(
+                    f"LLM {operation}: transient error on {provider}/{model_name} "
+                    f"(attempt {attempt}/{LLM_RETRY_ATTEMPTS}): {exc}. "
+                    f"Retrying in {delay:.2f}s."
+                )
+                await asyncio.sleep(delay)
+
+    model_list = ", ".join(f"{p}/{m}" for p, m in MODEL_CANDIDATES)
+    raise RuntimeError(
+        f"LLM {operation} failed across all configured models ({model_list}): {last_error}"
+    ) from last_error
+
+
+def _load_prompt_assets() -> Dict[str, Any]:
+    assets: Dict[str, Any] = {}
+    for key, filename in PROMPT_FILES.items():
+        file_path = PROMPTS_DIR / filename
+        if not file_path.exists():
+            raise RuntimeError(f"Required prompt asset missing: {file_path}")
+
+        raw_text = file_path.read_text(encoding="utf-8-sig").strip()
+        if not raw_text:
+            raise RuntimeError(f"Prompt asset is empty: {file_path}")
+
+        if filename.endswith(".json"):
+            try:
+                assets[key] = json.loads(raw_text)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"Invalid JSON in prompt asset {file_path}: {exc}") from exc
+        else:
+            assets[key] = raw_text
+
+    length_profiles = assets["length_profiles"]
+    if not isinstance(length_profiles, dict):
+        raise RuntimeError("length_profiles.json must be a JSON object")
+
+    default_length = length_profiles.get("default_length")
+    profiles = length_profiles.get("profiles")
+    if not isinstance(default_length, str) or not default_length:
+        raise RuntimeError("length_profiles.json is missing a valid 'default_length'")
+    if not isinstance(profiles, dict) or not profiles:
+        raise RuntimeError("length_profiles.json is missing a valid 'profiles' object")
+    if default_length not in profiles:
+        raise RuntimeError("length_profiles.json default_length does not exist in profiles")
+
+    required_profile_keys = {
+        "target_seconds_min",
+        "target_seconds_max",
+        "minimum_wait_calls",
+        "sections_hint",
+        "summary",
+    }
+    for name, profile in profiles.items():
+        if not isinstance(profile, dict):
+            raise RuntimeError(f"Length profile '{name}' must be an object")
+        missing = required_profile_keys - set(profile.keys())
+        if missing:
+            missing_list = ", ".join(sorted(missing))
+            raise RuntimeError(f"Length profile '{name}' missing keys: {missing_list}")
+
+    return assets
+
+
+PROMPT_ASSETS = _load_prompt_assets()
+
+
+def get_length_profile(length: str) -> Dict[str, Any]:
+    profiles = PROMPT_ASSETS["length_profiles"]["profiles"]
+    default_length = PROMPT_ASSETS["length_profiles"]["default_length"]
+    if length in profiles:
+        profile = dict(profiles[length])
+    else:
+        profile = dict(profiles[default_length])
+    profile["length_name"] = length if length in profiles else default_length
+    return profile
+
+
+def _emit_progress(progress_callback: ProgressCallback, status: str, message: str) -> None:
+    if not progress_callback:
+        return
+    try:
+        progress_callback(status, message)
+    except Exception:
+        # Progress reporting must never break generation.
+        return
+
+
+def _strip_think_blocks(text: str) -> str:
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL)
+
+
+def _remove_markdown_fences(text: str) -> str:
+    text = re.sub(r"^\s*```(?:python|py)?\s*$", "", text, flags=re.IGNORECASE | re.MULTILINE)
+    text = re.sub(r"^\s*```\s*$", "", text, flags=re.MULTILINE)
+    return text
+
+
+def sanitize_generated_code(raw_code: str) -> str:
+    """Strip chain-of-thought tags and markdown wrappers from model output."""
+    text = (raw_code or "").replace("\r\n", "\n")
+    text = _strip_think_blocks(text)
+    text = _remove_markdown_fences(text).strip()
+
+    manim_import_match = re.search(r"(?m)^\s*from\s+manim\s+import\s+\*\s*$", text)
+    class_match = re.search(r"(?m)^\s*class\s+GenScene\b", text)
+
+    if manim_import_match:
+        text = text[manim_import_match.start():]
+    elif class_match:
+        text = text[class_match.start():]
+
+    return text.strip()
+
+
+def _extract_json_object(text: str) -> str:
+    cleaned = _strip_think_blocks(_remove_markdown_fences(text)).strip()
+    if not cleaned:
+        raise ValueError("Empty scene plan response")
+
+    # Fast path: entire response is valid JSON.
+    try:
+        json.loads(cleaned)
+        return cleaned
+    except json.JSONDecodeError:
+        pass
+
+    start = cleaned.find("{")
+    if start == -1:
+        raise ValueError("Scene plan response does not contain a JSON object")
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for idx in range(start, len(cleaned)):
+        char = cleaned[idx]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return cleaned[start:idx + 1]
+
+    raise ValueError("Could not extract a complete JSON object from scene plan response")
+
+
+def _normalize_scene_plan(scene_plan: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(scene_plan, dict):
+        raise ValueError("Scene plan must be a JSON object")
+
+    missing_top_level = SCENE_PLAN_REQUIRED_KEYS - set(scene_plan.keys())
+    if missing_top_level:
+        missing_list = ", ".join(sorted(missing_top_level))
+        raise ValueError(f"Scene plan missing required keys: {missing_list}")
+
+    scenes = scene_plan.get("scenes")
+    if not isinstance(scenes, list) or not scenes:
+        raise ValueError("Scene plan must include a non-empty 'scenes' array")
+
+    normalized_scenes = []
+    for index, scene in enumerate(scenes, start=1):
+        if not isinstance(scene, dict):
+            raise ValueError(f"Scene #{index} must be an object")
+
+        missing_scene_keys = SCENE_REQUIRED_KEYS - set(scene.keys())
+        if missing_scene_keys:
+            missing_list = ", ".join(sorted(missing_scene_keys))
+            raise ValueError(f"Scene #{index} missing keys: {missing_list}")
+
+        try:
+            duration_seconds = int(scene["duration_seconds"])
+        except (TypeError, ValueError):
+            raise ValueError(f"Scene #{index} has invalid duration_seconds")
+
+        if duration_seconds <= 0:
+            raise ValueError(f"Scene #{index} duration_seconds must be > 0")
+
+        visuals = scene.get("visuals")
+        technical_notes = scene.get("technical_notes")
+        if not isinstance(visuals, list) or not visuals:
+            raise ValueError(f"Scene #{index} must include non-empty visuals list")
+        if not isinstance(technical_notes, list) or not technical_notes:
+            raise ValueError(f"Scene #{index} must include non-empty technical_notes list")
+
+        normalized_scenes.append(
+            {
+                "name": str(scene["name"]).strip(),
+                "purpose": str(scene["purpose"]).strip(),
+                "duration_seconds": duration_seconds,
+                "visuals": [str(item).strip() for item in visuals if str(item).strip()],
+                "technical_notes": [
+                    str(item).strip() for item in technical_notes if str(item).strip()
+                ],
+                # Pass through optional enriched fields from the composer
+                **({"emotional_beat": str(scene["emotional_beat"]).strip()} if "emotional_beat" in scene else {}),
+                **({"animations": [str(a).strip() for a in scene["animations"] if str(a).strip()]} if isinstance(scene.get("animations"), list) else {}),
+            }
+        )
+
+    return {
+        "title": str(scene_plan.get("title", "")).strip(),
+        "hook": str(scene_plan.get("hook", "")).strip(),
+        "narrative_arc": str(scene_plan.get("narrative_arc", "")).strip(),
+        "scenes": normalized_scenes,
+        # Pass through optional enriched fields from the composer
+        **({"narrative_pattern": str(scene_plan["narrative_pattern"]).strip()} if "narrative_pattern" in scene_plan else {}),
+        **({"color_palette": scene_plan["color_palette"]} if isinstance(scene_plan.get("color_palette"), dict) else {}),
+    }
+
+
+def _format_scene_plan_schema_hint() -> str:
+    return (
+        '{"title":"string","hook":"string","narrative_arc":"string",'
+        '"scenes":[{"name":"string","purpose":"string",'
+        '"duration_seconds":10,"visuals":["string"],'
+        '"technical_notes":["string"]}]}'
+    )
+
+
+async def compose_scene_plan(prompt: str, length: str) -> Dict[str, Any]:
+    profile = get_length_profile(length)
+    prompt_template = ChatPromptTemplate.from_messages(
+        [
+            SystemMessage(content=PROMPT_ASSETS["composer_system"]),
+            (
+                "human",
+                "User prompt:\n{prompt}\n\n"
+                "Length selection: {length_name}\n"
+                "Length profile JSON:\n{length_profile_json}\n\n"
+                "Produce a scene plan with strong educational flow and concrete visual steps.\n"
+                "Return JSON only using this schema:\n{schema_hint}",
+            ),
+        ]
+    )
+
+    raw_response = await _invoke_with_resilience(
+        prompt_template,
+        {
+            "prompt": prompt,
+            "length_name": profile["length_name"],
+            "length_profile_json": json.dumps(profile, indent=2),
+            "schema_hint": _format_scene_plan_schema_hint(),
+        },
+        operation="compose_scene_plan",
+    )
+
+    parsed = json.loads(_extract_json_object(raw_response))
+    return _normalize_scene_plan(parsed)
+
+
+async def generate_code_from_plan(prompt: str, length: str, scene_plan: Dict[str, Any]) -> str:
+    profile = get_length_profile(length)
+    prompt_template = ChatPromptTemplate.from_messages(
+        [
+            SystemMessage(content=PROMPT_ASSETS["codegen_system"]),
+            (
+                "human",
+                "User prompt:\n{prompt}\n\n"
+                "Length selection: {length_name}\n"
+                "Length profile JSON:\n{length_profile_json}\n\n"
+                "Scene plan JSON:\n{scene_plan_json}\n\n"
+                "Generate executable Python code for ManimCE.\n"
+                "Return code only.",
+            ),
+        ]
+    )
+
+    raw_response = await _invoke_with_resilience(
+        prompt_template,
+        {
+            "prompt": prompt,
+            "length_name": profile["length_name"],
+            "length_profile_json": json.dumps(profile, indent=2),
+            "scene_plan_json": json.dumps(scene_plan, indent=2),
+        },
+        operation="generate_code_from_plan",
+    )
+
+    return sanitize_generated_code(raw_response)
+
+
+def _get_call_name(node: ast.AST) -> Optional[str]:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def _contains_animate_builder(node: ast.AST) -> bool:
+    current = node
+    while isinstance(current, ast.Attribute):
+        if current.attr == "animate":
+            return True
+        current = current.value
+    return False
+
+
+def _is_animation_expression(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+
+    func_name = _get_call_name(node.func)
+    if func_name in ANIMATION_FN_NAMES:
+        return True
+
+    if isinstance(node.func, ast.Attribute) and _contains_animate_builder(node.func):
+        return True
+
+    return False
+
+
+def _collect_animation_variables(tree: ast.AST) -> Set[str]:
+    animation_vars: Set[str] = set()
+    for node in ast.walk(tree):
+        value_node = None
+        target_nodes: List[ast.AST] = []
+
+        if isinstance(node, ast.Assign):
+            value_node = node.value
+            target_nodes = list(node.targets)
+        elif isinstance(node, ast.AnnAssign):
+            value_node = node.value
+            target_nodes = [node.target]
+
+        if value_node is None or not _is_animation_expression(value_node):
+            continue
+
+        for target in target_nodes:
+            if isinstance(target, ast.Name):
+                animation_vars.add(target.id)
+            elif isinstance(target, (ast.Tuple, ast.List)):
+                for elt in target.elts:
+                    if isinstance(elt, ast.Name):
+                        animation_vars.add(elt.id)
+
+    return animation_vars
+
+
+def _has_required_manim_import(tree: ast.AST) -> bool:
+    for node in getattr(tree, "body", []):
+        if isinstance(node, ast.ImportFrom) and node.module == "manim":
+            for alias in node.names:
+                if alias.name == "*":
+                    return True
+    return False
+
+
+def _has_valid_genscene_class(tree: ast.AST) -> bool:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef) or node.name != "GenScene":
+            continue
+
+        for base in node.bases:
+            base_name = _get_call_name(base)
+            if base_name in ALLOWED_SCENE_BASES:
+                return True
+
+    return False
+
+
+def _detect_play_antipatterns(tree: ast.AST) -> List[str]:
+    errors: List[str] = []
+    animation_vars = _collect_animation_variables(tree)
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+
+        if not isinstance(node.func, ast.Attribute) or node.func.attr != "play":
+            continue
+
+        for arg in node.args:
+            if isinstance(arg, ast.Starred):
+                continue
+
+            if isinstance(arg, ast.Name) and arg.id not in animation_vars:
+                errors.append(
+                    f"Line {arg.lineno}: possible raw mobject passed to self.play('{arg.id}')"
+                )
+
+    return errors
+
+
+def _iter_tex_string_literals(tree: ast.AST):
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+
+        func_name = _get_call_name(node.func)
+        if func_name not in {"MathTex", "Tex"}:
+            continue
+
+        for arg in node.args:
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                yield arg.lineno, arg.value
+            elif isinstance(arg, ast.JoinedStr):
+                parts = []
+                for part in arg.values:
+                    if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                        parts.append(part.value)
+                if parts:
+                    yield arg.lineno, "".join(parts)
+
+
+def _detect_forbidden_unicode_math(tree: ast.AST) -> List[str]:
+    errors: List[str] = []
+    for lineno, tex_literal in _iter_tex_string_literals(tree):
+        for symbol, replacement in FORBIDDEN_MATH_UNICODE.items():
+            if symbol in tex_literal:
+                errors.append(
+                    f"Line {lineno}: use LaTeX '{replacement}' instead of unicode '{symbol}'"
+                )
+    return errors
+
+
+def _detect_forbidden_tex_macros(tree: ast.AST) -> List[str]:
+    errors: List[str] = []
+    for lineno, tex_literal in _iter_tex_string_literals(tree):
+        normalized_tex = re.sub(r"\\{2,}", r"\\", tex_literal)
+        for macro, replacement in FORBIDDEN_TEX_MACROS.items():
+            if macro in tex_literal or macro in normalized_tex:
+                errors.append(
+                    f"Line {lineno}: avoid LaTeX macro '{macro}' (package-dependent); use {replacement} instead"
+                )
+    return errors
+
+
+def _extract_string_literal(node: ast.AST) -> Optional[str]:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.JoinedStr):
+        parts: List[str] = []
+        for part in node.values:
+            if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                parts.append(part.value)
+        if parts:
+            return "".join(parts)
+    return None
+
+
+def _detect_external_asset_dependencies(tree: ast.AST) -> List[str]:
+    errors: List[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+
+        func_name = _get_call_name(node.func)
+        if func_name not in EXTERNAL_ASSET_MOBJECTS:
+            continue
+
+        for arg in node.args:
+            literal = _extract_string_literal(arg)
+            if literal:
+                errors.append(
+                    f"Line {node.lineno}: external asset reference '{literal}' is not allowed; use built-in Manim primitives instead"
+                )
+                break
+
+    return errors
+
+
+def _is_point_like_call(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+
+    func_name = _get_call_name(node.func)
+    if func_name in {"get_center", "get_start", "get_end", "c2p", "n2p", "coords_to_point"}:
+        return True
+    return False
+
+
+def _is_numpy_array_call_with_length(node: ast.AST, expected_length: int) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+
+    if isinstance(node.func, ast.Attribute):
+        is_numpy_array = (
+            isinstance(node.func.value, ast.Name)
+            and node.func.value.id in {"np", "numpy"}
+            and node.func.attr == "array"
+        )
+    else:
+        is_numpy_array = isinstance(node.func, ast.Name) and node.func.id == "array"
+
+    if not is_numpy_array or not node.args:
+        return False
+
+    first_arg = node.args[0]
+    if isinstance(first_arg, (ast.List, ast.Tuple)):
+        return len(first_arg.elts) == expected_length
+    return False
+
+
+def _contains_two_item_numpy_array(node: ast.AST) -> bool:
+    return any(_is_numpy_array_call_with_length(subnode, 2) for subnode in ast.walk(node))
+
+
+def _contains_point_like_expression(node: ast.AST) -> bool:
+    return any(_is_point_like_call(subnode) for subnode in ast.walk(node))
+
+
+def _detect_mixed_point_dimension_expressions(tree: ast.AST) -> List[str]:
+    errors: List[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.BinOp):
+            continue
+        if not isinstance(node.op, (ast.Add, ast.Sub)):
+            continue
+
+        left_has_point = _contains_point_like_expression(node.left)
+        right_has_point = _contains_point_like_expression(node.right)
+        left_has_2d_array = _contains_two_item_numpy_array(node.left)
+        right_has_2d_array = _contains_two_item_numpy_array(node.right)
+
+        if (left_has_point and right_has_2d_array) or (right_has_point and left_has_2d_array):
+            errors.append(
+                f"Line {node.lineno}: mixing 3D Manim points with 2D np.array([...]) may crash "
+                "with broadcast shape errors; use 3D arrays like np.array([x, y, 0])"
+            )
+
+    return errors
+
+
+def _detect_bare_opacity_kwarg(tree: ast.AST) -> List[str]:
+    """Detect `opacity=...` passed as a keyword argument to any constructor/call.
+
+    ManimCE Mobjects do not accept a bare ``opacity`` kwarg.  The correct
+    parameters are ``fill_opacity`` and ``stroke_opacity``, or calling
+    ``.set_opacity()`` after creation.
+    """
+    errors: List[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        for kw in node.keywords:
+            if kw.arg == "opacity":
+                errors.append(
+                    f"Line {kw.col_offset}: 'opacity' is not a valid Mobject keyword; "
+                    "use 'fill_opacity' or 'stroke_opacity' instead"
+                )
+    return errors
+
+
+# Manim constructors that accept point/coordinate arguments
+_POINT_ACCEPTING_CONSTRUCTORS = {
+    "Arrow", "Line", "DashedLine", "DoubleArrow", "Vector",
+    "CurvedArrow", "Dot", "Dot3D", "Arrow3D", "Arc",
+    "Polygon", "Brace", "RightAngle",
 }
 
 
-template = """
-You are a WORLD-CLASS Manim animator creating content EXACTLY like 3BLUE1BROWN (Grant Sanderson).
-Your animations should be indistinguishable from actual 3Blue1Brown videos.
-
-═══════════════════════════════════════════════════════════════════
-TOPIC: {prompt}
-DURATION: {length_instruction}
-═══════════════════════════════════════════════════════════════════
-
-## 🎨 THE 3BLUE1BROWN SIGNATURE STYLE
-
-### Core Philosophy:
-1. **PROGRESSIVE REVELATION** - Build concepts layer by layer, never dump everything at once
-2. **MEANINGFUL MOTION** - Every animation teaches something, nothing is decorative
-3. **MATHEMATICAL BEAUTY** - Elegant transitions that reveal deep connections
-4. **BREATHING ROOM** - Let viewers absorb with strategic pauses
-
-### Color Palette (USE THESE EXACT COLORS):
-```python
-# Primary elements (the signature 3b1b blue)
-BLUE_E, BLUE_D, BLUE_C
-
-# Highlights and results (attention-grabbing)  
-YELLOW, GOLD
-
-# Supporting elements
-TEAL_E, GREEN_D, GREEN_C
-
-# Contrast/negative
-RED_D, MAROON
-
-# Text hierarchy
-WHITE  # main text
-GRAY_B  # secondary text/labels
-```
-
-### The 3b1b Animation Patterns:
-
-**PATTERN 1: Progressive Build**
-```python
-# Start simple, add complexity
-circle = Circle(color=BLUE_D, fill_opacity=0.3)
-self.play(Create(circle), run_time=1.5)
-self.wait(1)
-
-# Add detail
-radius = Line(circle.get_center(), circle.get_right(), color=YELLOW)
-self.play(Create(radius))
-self.wait(1)
-
-# Add label
-label = MathTex(r"r", color=YELLOW).next_to(radius, UP, buff=0.1)
-self.play(Write(label))
-self.wait(1)
-```
-
-**PATTERN 2: Transform to Reveal Connections**
-```python
-# Show relationship through morphing
-eq1 = MathTex(r"A = {{\\pi}} {{r}} {{^2}}", font_size=48)
-eq2 = MathTex(r"A = {{3.14...}} {{r}} {{^2}}", font_size=48)
-self.play(Write(eq1))
-self.wait(1)
-self.play(TransformMatchingTex(eq1, eq2))
-self.wait(2)
-```
-
-**PATTERN 3: Geometric Elegance**
-```python
-# Create smooth, connected shapes
-points = [UP*2, RIGHT*2, DOWN*2, LEFT*2]
-shape = Polygon(*points, color=BLUE_D, fill_opacity=0.2)
-self.play(DrawBorderThenFill(shape), run_time=2)
-```
-
-**PATTERN 4: Animated Graphs**
-```python
-axes = Axes(x_range=[-3, 3], y_range=[-2, 2], axis_config={{"color": GRAY_B}})
-graph = axes.plot(lambda x: np.sin(x), color=BLUE_D)
-self.play(Create(axes))
-self.play(Create(graph), run_time=2)
-# Add moving dot
-dot = Dot(color=YELLOW).move_to(axes.c2p(0, 0))
-self.play(MoveAlongPath(dot, graph), run_time=3)
-```
-
-**PATTERN 5: Text with Purpose**
-```python
-# Titles centered, then move
-title = Text("The Concept", font_size=52, weight=BOLD, color=WHITE)
-self.play(Write(title))
-self.wait(1.5)
-self.play(title.animate.scale(0.6).to_corner(UL))
-
-# Now show visual with title still visible
-diagram = Circle(color=BLUE_D)
-self.play(Create(diagram))
-```
-
-## ⚡ ANIMATION TECHNIQUES
-
-### Entrance Animations (by use case):
-- `Write()` → Text, equations
-- `Create()` → Lines, curves, outlines
-- `DrawBorderThenFill()` → Filled shapes (elegant!)
-- `GrowFromCenter()` → Emphasis, key reveals
-- `FadeIn(shift=UP*0.3)` → Subtle, professional
-
-### Transformations (the 3b1b specialty):
-- `Transform(a, b)` → Morph shapes to show relationships
-- `ReplacementTransform(a, b)` → Replace one concept with another
-- `TransformMatchingTex()` → Equation simplification
-- `MoveToTarget()` → Animated repositioning
-
-### Camera & Focus:
-- `self.play(obj.animate.set_color(YELLOW))` → Highlight
-- `Indicate(obj)` → Quick attention flash
-- `Circumscribe(obj, color=YELLOW)` → Circle emphasis
-- `SurroundingRectangle(obj, color=YELLOW)` → Box highlight
-
-### Grouping (essential for complex animations):
-```python
-# Keep related items together
-formula_group = VGroup(
-    MathTex(r"\\text{{Step 1:}}"),
-    MathTex(r"x + y = 5"),
-    MathTex(r"\\text{{Step 2:}}"),
-    MathTex(r"x = 5 - y")
-).arrange(DOWN, aligned_edge=LEFT, buff=0.4)
-formula_group.scale(0.8).to_edge(LEFT)
-```
-
-## 🔧 TECHNICAL REQUIREMENTS
-
-### Code Structure:
-```python
-from manim import *
-import numpy as np  # Only if using 3D or math functions
-
-class GenScene(Scene):  # or ThreeDScene for 3D
-    def construct(self):
-        # Your animation here
-```
-
-### For 3D Animations ONLY (surfaces, spheres, 3D objects):
-```python
-class GenScene(ThreeDScene):
-    def construct(self):
-        self.set_camera_orientation(phi=70*DEGREES, theta=-45*DEGREES)
-        axes = ThreeDAxes()
-        # 3D content...
-        self.move_camera(phi=60*DEGREES, theta=30*DEGREES, run_time=2)
-```
-
-### LaTeX Math (CRITICAL):
-```python
-# ALWAYS use raw strings and proper LaTeX
-MathTex(r"E = mc^2")
-MathTex(r"\\frac{{a}}{{b}}")  # Double braces!
-MathTex(r"\\sqrt{{x}}")
-MathTex(r"\\int_0^1 x^2 dx")
-MathTex(r"\\sum_{{i=1}}^n")
-# NEVER use unicode: ×, ÷, π, ≈, ∑ → use \\times, \\div, \\pi, \\approx, \\sum
-```
-
-### ⚠️ COMMON ERRORS TO AVOID (CRITICAL - MEMORIZE THESE):
-
-**ANIMATION SYNTAX ERRORS (MOST COMMON - WILL CRASH):**
-```python
-# ❌ WRONG - passing object directly to play():
-self.play(my_vgroup)  # TypeError: cannot be converted to animation
-self.play(my_circle)  # TypeError: cannot be converted to animation
-self.play(my_text)    # TypeError: cannot be converted to animation
-
-# ✓ CORRECT - ALWAYS wrap objects in animation functions:
-self.play(Create(my_vgroup))      # For shapes/groups
-self.play(Write(my_text))         # For text
-self.play(FadeIn(my_circle))      # For fading in
-self.play(FadeOut(my_object))     # For fading out
-self.play(Transform(a, b))        # For morphing
-self.play(my_obj.animate.shift(RIGHT))  # For .animate syntax
-```
-
-**RULE: self.play() ONLY accepts:**
-- Animation objects: `Create()`, `Write()`, `FadeIn()`, `FadeOut()`, `Transform()`, `DrawBorderThenFill()`
-- The `.animate` syntax: `obj.animate.shift()`, `obj.animate.scale()`
-- NEVER pass raw Mobjects (Circle, VGroup, Text) directly!
-
-**API ERRORS - These will crash your code:**
-1. `opacity=0.5` ❌ → `fill_opacity=0.5` ✓
-2. `about_vector=UP` ❌ → `axis=UP` ✓
-3. `axes.x_axis_end` ❌ → `axes.x_axis.get_end()` ✓
-4. `axes.y_axis_end` ❌ → `axes.y_axis.get_end()` ✓
-5. `axes.z_axis_end` ❌ → `axes.z_axis.get_end()` ✓
-6. `Surface(opacity=0.5)` ❌ → `Surface(fill_opacity=0.5)` ✓
-7. `self.play(vgroup)` ❌ → `self.play(Create(vgroup))` ✓
-8. Scene for 3D ❌ → ThreeDScene ✓
-
-**LATEX ERRORS:**
-9. Unicode symbols (×, ÷, π) ❌ → LaTeX commands (\\times, \\div, \\pi) ✓
-10. Single braces in template ❌ → Double braces {{}} ✓
-
-**STYLE ERRORS:**
-11. Font size > 52 ❌ → font_size ≤ 48 ✓
-12. No scaling before display ❌ → Always .scale() first ✓
-
-**SYNTAX ERRORS (WILL CRASH - CHECK CAREFULLY):**
-13. Mismatched brackets ❌ → Match every ( with ), [ with ], curly with curly ✓
-14. Missing closing parenthesis ❌ → Count opening and closing parens ✓
-15. Mixing [] and () ❌ → Lists use [], function calls use () ✓
-
-```python
-# ❌ WRONG - mismatched brackets:
-self.play(Create(VGroup(*[item1, item2]))  # Missing )
-Arrow3D(start=ORIGIN, end=[1, 2, 3)  # ] and ) mixed up
-
-# ✓ CORRECT - properly matched:
-self.play(Create(VGroup(*[item1, item2])))  # All matched
-Arrow3D(start=ORIGIN, end=[1, 2, 3])  # Correct
-```
-
-**3D SPECIFIC ERRORS (CRITICAL - THESE WILL CRASH):**
-13. `ThreeDAxes.x_axis_end` ❌ → Does not exist! Use `axes.c2p(x_max, 0, 0)` ✓
-14. Camera without set_camera_orientation ❌ → Always call it first ✓
-15. Text in 3D without add_fixed_in_frame_mobjects ❌ → Add text to fixed frame ✓
-16. `Arrow3D.vector` ❌ → Does not exist! Use `arrow.get_end() - arrow.get_start()` ✓
-17. `Arrow3D(direction=...)` ❌ → Use `Arrow3D(start=ORIGIN, end=RIGHT*2)` ✓
-18. `Vector3D` ❌ → Does not exist! Use `Arrow3D` or `Line3D` ✓
-19. `arrow.get_vector()` ❌ → Use `arrow.get_end() - arrow.get_start()` ✓
-
-**CORRECT 3D ARROW PATTERNS (USE THESE EXACTLY):**
-```python
-# Creating 3D arrows - ALWAYS use start and end points
-arrow_x = Arrow3D(start=ORIGIN, end=[2, 0, 0], color=RED)
-arrow_y = Arrow3D(start=ORIGIN, end=[0, 2, 0], color=GREEN)
-arrow_z = Arrow3D(start=ORIGIN, end=[0, 0, 2], color=BLUE)
-
-# Getting the direction vector from an arrow
-direction = arrow_x.get_end() - arrow_x.get_start()  # Returns numpy array
-
-# Creating arrows from one point to another
-arrow = Arrow3D(start=[1, 1, 1], end=[3, 2, 4], color=YELLOW)
-
-# NEVER use these (they don't exist):
-# arrow.vector ❌
-# arrow.get_vector() ❌
-# Arrow3D(direction=UP) ❌
-# Vector3D(...) ❌
-```
-
-**CORRECT 3D AXES PATTERNS:**
-```python
-# Getting axis endpoints
-axes = ThreeDAxes(x_range=[-3, 3], y_range=[-3, 3], z_range=[-3, 3])
-x_end = axes.c2p(3, 0, 0)  # Point at end of x-axis
-y_end = axes.c2p(0, 3, 0)  # Point at end of y-axis
-z_end = axes.c2p(0, 0, 3)  # Point at end of z-axis
-
-# For axis labels in 3D
-x_label = MathTex("x").next_to(axes.c2p(3, 0, 0), RIGHT)
-self.add_fixed_in_frame_mobjects(x_label)
-```
-
-**SAFE 3D OBJECTS TO USE:**
-- `Sphere(radius=1, color=BLUE)` ✓
-- `Cube(side_length=2, color=RED)` ✓
-- `Arrow3D(start=ORIGIN, end=[1,1,1])` ✓
-- `Line3D(start=ORIGIN, end=[2,0,0])` ✓
-- `Surface(func, u_range, v_range, fill_opacity=0.7)` ✓
-- `ThreeDAxes()` ✓
-- `Dot3D(point=[1,2,3])` ✓
-
-**CUBE/PRISM SPECIFIC ERRORS (CRITICAL):**
-20. `cube.vertices` ❌ → Does not exist! Use `cube.get_vertices()` ✓
-21. `Cube.vertices` attribute ❌ → Call `cube.get_vertices()` method instead ✓
-22. `prism.vertices` ❌ → Use `prism.get_vertices()` ✓
-
-**CORRECT CUBE PATTERNS:**
-```python
-# Creating a cube
-cube = Cube(side_length=2, color=BLUE, fill_opacity=0.5)
-
-# Getting vertices - MUST use method, NOT attribute
-vertices = cube.get_vertices()  # Returns list of points
-
-# Getting specific corners
-corners = cube.get_vertices()
-top_right = corners[0]  # Access by index
-
-# NEVER use these (they don't exist):
-# cube.vertices ❌
-# cube.vertex ❌
-```
-
-## ⚠️ CRITICAL: PREVENT OFF-SCREEN ELEMENTS (MANDATORY)
-
-**THE SCREEN BOUNDS ARE ABSOLUTE - NOTHING MAY EXCEED THEM:**
-- Horizontal: x must be between -5.5 and 5.5 (USE SMALLER BOUNDS FOR SAFETY)
-- Vertical: y must be between -3.0 and 3.0 (USE SMALLER BOUNDS FOR SAFETY)
-
-### MANDATORY SCALING RULES (USE SMALLER SCALES):
-
-**RULE 1: Always scale content SMALL**
-```python
-# For any complex diagram or group:
-my_group = VGroup(item1, item2, item3, item4)
-my_group.arrange(RIGHT, buff=0.2)
-my_group.scale_to_fit_width(10)  # Use 10, NOT 12
-my_group.move_to(ORIGIN)  # Center it
-```
-
-**RULE 2: NEVER show text and diagrams at the same time**
-```python
-# WRONG - causes overlap:
-title = Text("Title").to_edge(UP)
-diagram = Circle()
-self.play(Write(title), Create(diagram))  # OVERLAP!
-
-# CORRECT - show separately:
-title = Text("Title", font_size=42)
-self.play(Write(title))
-self.wait(1.5)
-self.play(FadeOut(title))  # Remove title FIRST
-diagram = Circle().scale(0.5)  # Then show diagram
-self.play(Create(diagram))
-```
-
-**RULE 2: Use scale() for large objects**
-```python
-# Scale large shapes BEFORE adding to scene
-big_diagram = create_complex_diagram()
-big_diagram.scale(0.6)  # Scale down to 60%
-big_diagram.move_to(ORIGIN)  # Then center
-self.play(Create(big_diagram))
-```
-
-**RULE 3: Use safe positioning methods**
-```python
-# SAFE - stays on screen:
-obj.to_edge(LEFT, buff=0.5)   # buff keeps it away from edge
-obj.to_corner(UL, buff=0.3)   # Corner with buffer
-obj.move_to(ORIGIN)           # Center
-obj.next_to(other, RIGHT, buff=0.3)  # Relative to another
-
-# DANGEROUS - can go off screen:
-obj.shift(RIGHT * 8)  # ❌ Too far!
-obj.move_to([10, 0, 0])  # ❌ Outside bounds!
-```
-
-**RULE 4: For multiple items, arrange then scale**
-```python
-# Create items
-boxes = VGroup(*[Square().scale(0.5) for _ in range(8)])
-# Arrange in a row
-boxes.arrange(RIGHT, buff=0.2)
-# Scale entire group to fit
-boxes.scale_to_fit_width(11)  # Leave margin
-boxes.move_to(ORIGIN)
-```
-
-**RULE 5: For text with diagrams**
-```python
-# Title at top (scaled small)
-title = Text("Title", font_size=36).to_edge(UP, buff=0.3)
-
-# Diagram in center (scaled to fit remaining space)  
-diagram = create_diagram().scale(0.6)
-diagram.next_to(title, DOWN, buff=0.5)
-
-# Equation at bottom
-eq = MathTex(r"equation").to_edge(DOWN, buff=0.3)
-```
-
-**RULE 6: For 3D scenes, always scale down**
-```python
-# 3D objects appear larger - scale them down
-axes = ThreeDAxes().scale(0.5)
-surface = Surface(...).scale(0.4)
-```
-
-### Screen Zones (stay within these):
-- **TOP (y: 2.5 to 3.5)**: Titles only, font_size ≤ 42
-- **CENTER (y: -2 to 2)**: Main diagrams, MUST be scaled to fit
-- **BOTTOM (y: -3.5 to -2.5)**: Labels and equations, font_size ≤ 36
-
-### Prevent Overlap:
-```python
-# Show title ALONE first
-title = Text("Title", font_size=42)
-self.play(Write(title))
-self.wait(1.5)
-self.play(FadeOut(title))  # THEN show diagram
-
-# OR keep title and scale diagram to fit
-title.to_edge(UP)
-diagram.scale(0.5).shift(DOWN*0.3)  # Scale DOWN and leave room
-```
-
-### Transitions Between Sections:
-```python
-self.play(FadeOut(*self.mobjects))
-self.wait(0.5)
-# New section starts on blank canvas
-```
-
-## 📝 COMPLETE EXAMPLE (60-second video):
-
-```python
-from manim import *
-
-class GenScene(Scene):
-    def construct(self):
-        # === SECTION 1: TITLE (5s) ===
-        title = Text("The Pythagorean Theorem", font_size=48, weight=BOLD)
-        self.play(Write(title), run_time=1.5)
-        self.wait(2)
-        self.play(title.animate.scale(0.5).to_corner(UL))
-        
-        # === SECTION 2: BUILD THE TRIANGLE (15s) ===
-        # Create triangle progressively
-        triangle = Polygon(
-            ORIGIN, RIGHT*3, RIGHT*3 + UP*4,
-            color=BLUE_D, fill_opacity=0.3
-        ).move_to(ORIGIN)
-        
-        self.play(DrawBorderThenFill(triangle), run_time=2)
-        self.wait(1)
-        
-        # Add side labels one by one
-        a_label = MathTex("a", color=YELLOW).next_to(triangle, DOWN)
-        b_label = MathTex("b", color=YELLOW).next_to(triangle, RIGHT)
-        c_label = MathTex("c", color=RED_D).move_to(triangle.get_center() + LEFT*0.8 + UP*0.5)
-        
-        self.play(Write(a_label))
-        self.wait(0.5)
-        self.play(Write(b_label))
-        self.wait(0.5)
-        self.play(Write(c_label))
-        self.wait(1.5)
-        
-        # === SECTION 3: SHOW THE FORMULA (15s) ===
-        # Build equation step by step
-        eq_parts = VGroup(
-            MathTex(r"a^2", color=YELLOW),
-            MathTex(r"+", color=WHITE),
-            MathTex(r"b^2", color=YELLOW),
-            MathTex(r"=", color=WHITE),
-            MathTex(r"c^2", color=RED_D)
-        ).arrange(RIGHT, buff=0.3).to_edge(DOWN)
-        
-        for part in eq_parts:
-            self.play(Write(part), run_time=0.5)
-            self.wait(0.3)
-        
-        self.wait(2)
-        
-        # === SECTION 4: HIGHLIGHT THE RELATIONSHIP (10s) ===
-        # Flash to show connections
-        self.play(Indicate(a_label), Indicate(eq_parts[0]))
-        self.wait(1)
-        self.play(Indicate(b_label), Indicate(eq_parts[2]))
-        self.wait(1)
-        self.play(Indicate(c_label), Indicate(eq_parts[4]))
-        self.wait(2)
-        
-        # === SECTION 5: CONCLUSION (15s) ===
-        self.play(FadeOut(triangle, a_label, b_label, c_label, title))
-        
-        final_eq = MathTex(r"a^2 + b^2 = c^2", font_size=72, color=GOLD)
-        final_eq.move_to(ORIGIN)
-        
-        self.play(TransformFromCopy(eq_parts, final_eq), run_time=2)
-        self.wait(1)
-        
-        box = SurroundingRectangle(final_eq, color=BLUE_D, buff=0.3)
-        self.play(Create(box))
-        self.wait(3)
-```
-
-## YOUR TASK:
-Create a STUNNING 3Blue1Brown-quality animation for: "{prompt}"
-
-Focus on:
-1. Progressive visual construction
-2. Meaningful transformations that teach
-3. Elegant color usage
-4. Proper pacing with wait() calls
-5. Mathematical accuracy
-
-Return ONLY executable Python code. No markdown, no explanation.
-"""
-
-def clean_code(code: str) -> str:
-    """Remove any markdown formatting from the generated code."""
-    code = code.strip()
-    # Remove markdown code blocks
-    if code.startswith("```python"):
-        code = code[9:]
-    elif code.startswith("```"):
-        code = code[3:]
-    if code.endswith("```"):
-        code = code[:-3]
-    # Remove any leading/trailing whitespace
-    code = code.strip()
-    # Ensure the code starts with an import
-    if not code.startswith("from manim import"):
-        # Try to find where the actual code starts
-        if "from manim import" in code:
-            idx = code.index("from manim import")
-            code = code[idx:]
+def _is_2d_slice(node: ast.AST) -> bool:
+    """Check if node is a [:2] subscript slice, e.g. vec[:2]."""
+    if not isinstance(node, ast.Subscript):
+        return False
+    sl = node.slice
+    if isinstance(sl, ast.Slice):
+        if sl.upper is not None and isinstance(sl.upper, ast.Constant) and sl.upper.value == 2:
+            if sl.lower is None and sl.step is None:
+                return True
+    return False
+
+
+def _contains_2d_slice(node: ast.AST) -> bool:
+    """Recursively check if any sub-expression contains a [:2] slice."""
+    for child in ast.walk(node):
+        if _is_2d_slice(child):
+            return True
+    return False
+
+
+def _detect_2d_slices_in_constructors(tree: ast.AST) -> List[str]:
+    """Detect vec[:2] passed as arguments to Manim point-accepting constructors."""
+    errors: List[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+
+        func_name = _get_call_name(node.func)
+        if func_name not in _POINT_ACCEPTING_CONSTRUCTORS:
+            continue
+
+        for arg in node.args:
+            if _contains_2d_slice(arg):
+                errors.append(
+                    f"Line {node.lineno}: {func_name}() receives a [:2] sliced (2D) array; "
+                    "Manim requires 3D coordinates — use the full vector or np.array([x, y, 0])"
+                )
+                break
+
+        for kw in node.keywords:
+            if kw.arg in ("start", "end", "point", "direction") and _contains_2d_slice(kw.value):
+                errors.append(
+                    f"Line {node.lineno}: {func_name}({kw.arg}=) receives a [:2] sliced (2D) array; "
+                    "Manim requires 3D coordinates"
+                )
+
+    return errors
+
+
+def _detect_angle_misuse(tree: ast.AST) -> List[str]:
+    """Detect Angle() called with radius as a positional arg (causes 'multiple values' TypeError)."""
+    errors: List[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+
+        func_name = _get_call_name(node.func)
+        if func_name != "Angle":
+            continue
+
+        # Angle(line1, line2) is fine (2 positional args)
+        # Angle(line1, line2, something) with 3+ positional args means radius is positional
+        if len(node.args) >= 3:
+            has_radius_kw = any(kw.arg == "radius" for kw in node.keywords)
+            if has_radius_kw:
+                errors.append(
+                    f"Line {node.lineno}: Angle() has radius as both positional and keyword arg; "
+                    "use Angle(line1, line2, radius=value) with radius as keyword only"
+                )
+            else:
+                errors.append(
+                    f"Line {node.lineno}: Angle() has too many positional args; "
+                    "use Angle(line1, line2, radius=value) with radius as keyword only"
+                )
+
+    return errors
+
+
+def _count_wait_calls(tree: ast.AST) -> int:
+    count = 0
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "wait":
+            count += 1
+        elif isinstance(node.func, ast.Name) and node.func.id == "wait":
+            count += 1
+
+    return count
+
+
+def validate_code(code: str, length: str) -> List[str]:
+    errors: List[str] = []
+    normalized = (code or "").strip()
+
+    if not normalized:
+        return ["Generated code is empty"]
+
+    if "<think>" in normalized.lower():
+        errors.append("Output still contains <think> tags")
+    if "```" in normalized:
+        errors.append("Output still contains markdown code fences")
+
+    try:
+        tree = ast.parse(normalized)
+    except SyntaxError as exc:
+        errors.append(f"Syntax error at line {exc.lineno}: {exc.msg}")
+        return errors
+
+    if not _has_required_manim_import(tree):
+        errors.append("Missing required import: from manim import *")
+
+    if not _has_valid_genscene_class(tree):
+        errors.append("Missing class GenScene inheriting Scene/ThreeDScene/MovingCameraScene")
+
+    errors.extend(_detect_play_antipatterns(tree))
+    errors.extend(_detect_forbidden_unicode_math(tree))
+    errors.extend(_detect_forbidden_tex_macros(tree))
+    errors.extend(_detect_external_asset_dependencies(tree))
+    errors.extend(_detect_mixed_point_dimension_expressions(tree))
+    errors.extend(_detect_bare_opacity_kwarg(tree))
+    errors.extend(_detect_2d_slices_in_constructors(tree))
+    errors.extend(_detect_angle_misuse(tree))
+
+    min_wait_calls = int(get_length_profile(length).get("minimum_wait_calls", 0))
+    wait_calls = _count_wait_calls(tree)
+    if wait_calls < min_wait_calls:
+        errors.append(
+            f"Insufficient pacing: found {wait_calls} wait() calls, require >= {min_wait_calls} for {length}"
+        )
+
+    # De-duplicate while preserving order
+    deduped: List[str] = []
+    seen: Set[str] = set()
+    for error in errors:
+        if error not in seen:
+            deduped.append(error)
+            seen.add(error)
+    return deduped
+
+
+async def repair_code(
+    prompt: str,
+    length: str,
+    scene_plan: Dict[str, Any],
+    bad_code: str,
+    errors: List[str],
+) -> str:
+    profile = get_length_profile(length)
+    prompt_template = ChatPromptTemplate.from_messages(
+        [
+            SystemMessage(content=PROMPT_ASSETS["repair_system"]),
+            (
+                "human",
+                "User prompt:\n{prompt}\n\n"
+                "Length selection: {length_name}\n"
+                "Length profile JSON:\n{length_profile_json}\n\n"
+                "Scene plan JSON:\n{scene_plan_json}\n\n"
+                "Validation errors (must all be fixed):\n{errors}\n\n"
+                "Current code:\n{bad_code}\n\n"
+                "Return corrected executable code only.",
+            ),
+        ]
+    )
+
+    raw_response = await _invoke_with_resilience(
+        prompt_template,
+        {
+            "prompt": prompt,
+            "length_name": profile["length_name"],
+            "length_profile_json": json.dumps(profile, indent=2),
+            "scene_plan_json": json.dumps(scene_plan, indent=2),
+            "errors": "\n".join(f"- {item}" for item in errors),
+            "bad_code": bad_code,
+        },
+        operation="repair_code",
+    )
+
+    return sanitize_generated_code(raw_response)
+
+
+async def repair_code_from_runtime_error(
+    prompt: str,
+    length: str,
+    bad_code: str,
+    runtime_error: str,
+) -> str:
+    profile = get_length_profile(length)
+    prompt_template = ChatPromptTemplate.from_messages(
+        [
+            SystemMessage(content=RUNTIME_REPAIR_SYSTEM_PROMPT),
+            (
+                "human",
+                "User prompt:\n{prompt}\n\n"
+                "Length selection: {length_name}\n"
+                "Length profile JSON:\n{length_profile_json}\n\n"
+                "Render-time error:\n{runtime_error}\n\n"
+                "Current code:\n{bad_code}\n\n"
+                "Fix all runtime issues while keeping pacing constraints and ManimCE compatibility.\n"
+                "Return corrected executable code only.",
+            ),
+        ]
+    )
+
+    raw_response = await _invoke_with_resilience(
+        prompt_template,
+        {
+            "prompt": prompt,
+            "length_name": profile["length_name"],
+            "length_profile_json": json.dumps(profile, indent=2),
+            "runtime_error": runtime_error,
+            "bad_code": bad_code,
+        },
+        operation="repair_code_from_runtime_error",
+    )
+
+    repaired_code = sanitize_generated_code(raw_response)
+    errors = validate_code(repaired_code, length)
+    if errors:
+        raise ValueError(
+            "Runtime repair produced invalid code: " + _summarize_errors(errors)
+        )
+    return repaired_code
+
+
+def _summarize_errors(errors: List[str], max_items: int = 6) -> str:
+    if not errors:
+        return "No validation errors"
+    clipped = errors[:max_items]
+    summary = "; ".join(clipped)
+    if len(errors) > max_items:
+        summary += f"; ... (+{len(errors) - max_items} more)"
+    return summary
+
+
+def _auto_pad_wait_calls(code: str, length: str) -> str:
+    """Insert extra ``self.wait(1)`` calls if the code is just under the minimum.
+
+    This is a best-effort safety net applied *after* LLM repair attempts.  It
+    locates every ``self.play(...)`` call and inserts a ``self.wait(1)`` after
+    any that isn't already followed by a ``self.wait``.  It stops once the
+    minimum threshold is satisfied.
+    """
+    import re as _re
+
+    min_wait = int(get_length_profile(length).get("minimum_wait_calls", 0))
+    if min_wait <= 0:
+        return code
+
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return code
+
+    current_waits = _count_wait_calls(tree)
+    deficit = min_wait - current_waits
+    if deficit <= 0:
+        return code
+
+    lines = code.split("\n")
+    # Find self.play(...) lines that are NOT immediately followed by self.wait
+    insert_positions: List[int] = []
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if _re.match(r"self\.play\(", stripped):
+            # Check if next non-blank line is already a wait
+            for j in range(i + 1, min(i + 3, len(lines))):
+                next_stripped = lines[j].strip()
+                if not next_stripped:
+                    continue
+                if next_stripped.startswith("self.wait"):
+                    break
+                insert_positions.append(i)
+                break
+            else:
+                insert_positions.append(i)
+
+    if not insert_positions:
+        return code
+
+    # Insert from bottom to top so line numbers stay valid
+    inserted = 0
+    for pos in reversed(insert_positions):
+        if inserted >= deficit:
+            break
+        indent = len(lines[pos]) - len(lines[pos].lstrip())
+        pad_line = " " * indent + "self.wait(1)"
+        lines.insert(pos + 1, pad_line)
+        inserted += 1
+
+    return "\n".join(lines)
+
+
+async def generate_manim_code(
+    prompt: str,
+    length: str,
+    progress_callback: ProgressCallback = None,
+) -> str:
+    """Generate Manim code using compose -> codegen -> validate -> repair pipeline."""
+    _emit_progress(progress_callback, "composing", "Composing internal scene plan...")
+    scene_plan = await compose_scene_plan(prompt, length)
+
+    _emit_progress(progress_callback, "generating", "Generating Manim code from scene plan...")
+    code = await generate_code_from_plan(prompt, length, scene_plan)
+
+    _emit_progress(progress_callback, "validating", "Validating generated code...")
+    errors = validate_code(code, length)
+
+    max_retries = 2
+    retry = 0
+    while errors and retry < max_retries:
+        retry += 1
+        _emit_progress(
+            progress_callback,
+            "repairing",
+            f"Repairing invalid code (attempt {retry}/{max_retries})...",
+        )
+        code = await repair_code(prompt, length, scene_plan, code, errors)
+        _emit_progress(progress_callback, "validating", "Re-validating repaired code...")
+        errors = validate_code(code, length)
+
+    if errors:
+        # Last-resort: auto-pad wait() calls if that's the only remaining issue
+        pacing_only = all("Insufficient pacing" in e for e in errors)
+        if pacing_only:
+            code = _auto_pad_wait_calls(code, length)
+            errors = validate_code(code, length)
+
+    if errors:
+        raise ValueError(
+            "Code validation failed after 2 repair attempts: " + _summarize_errors(errors)
+        )
+
     return code
 
-
-async def generate_manim_code(prompt: str, length: str) -> str:
-    """Generate Manim animation code from a user prompt."""
-    # Resolve length instruction
-    length_instruction = LENGTH_GUIDE.get(
-        length, 
-        "Target duration: ~15 seconds. Standard explanation with 2-3 sections."
-    )
-    
-    prompt_template = ChatPromptTemplate.from_template(template)
-    chain = prompt_template | llm | StrOutputParser()
-    
-    response = await chain.ainvoke({
-        "prompt": prompt, 
-        "length_instruction": length_instruction
-    })
-    
-    return clean_code(response)

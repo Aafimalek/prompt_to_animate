@@ -93,7 +93,10 @@ def execute_manim_code(code: str, upload_to_s3: bool = True, resolution: str = "
         clean_msg = '\n'.join(filtered_lines)
         
         # Try to find the actual Python error
-        error_match = re.search(r'(TypeError|AttributeError|ValueError|NameError|SyntaxError|KeyError|IndexError|RuntimeError):\s*(.+)', clean_msg)
+        error_match = re.search(
+            r'(TypeError|AttributeError|ValueError|NameError|SyntaxError|KeyError|IndexError|RuntimeError|FileNotFoundError|OSError):\s*(.+)',
+            clean_msg
+        )
         
         if error_match:
             error_type = error_match.group(1)

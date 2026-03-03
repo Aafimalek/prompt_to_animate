@@ -161,15 +161,17 @@ sequenceDiagram
     F->>B: POST /generate-stream
     
     B->>F: SSE: Step 1 - Analyzing prompt
-    B->>G: Send engineered prompt
-    B->>F: SSE: Step 2 - Generating code
+    B->>G: Compose scene plan (Pass 1)
+    B->>F: SSE: Step 2 - Composing scenes
+    G-->>B: Return scene plan JSON
+    B->>G: Generate code from plan (Pass 2)
+    B->>F: SSE: Step 3 - Generating code
     G-->>B: Return Python code
-    B->>F: SSE: Step 3 - Code ready
+    B->>F: SSE: Step 4 - Validating / repairing code
     
     B->>M: Execute manim -qh script.py
-    B->>F: SSE: Step 4 - Rendering frames
+    B->>F: SSE: Step 5 - Rendering / finalizing
     M-->>B: Generate video.mp4
-    B->>F: SSE: Step 5 - Finalizing
     
     B-->>F: SSE: Step 6 - Complete {video_url, code}
     F-->>U: Display video + code viewer
@@ -231,13 +233,19 @@ prompt_to_animate/
 ├── backend/                          # 🐍 Python FastAPI Backend
 │   ├── __init__.py                   # Package marker
 │   ├── main.py                       # FastAPI app, routes (/generate, /generate-stream, /chats)
-│   ├── llm_service.py                # Prompt engineering, Groq LLM integration
+│   ├── llm_service.py                # 2-pass generation (compose -> codegen -> validate/repair)
+│   ├── prompts/                      # Versioned runtime prompt assets
+│   │   ├── composer_system.md
+│   │   ├── codegen_system.md
+│   │   ├── repair_system.md
+│   │   └── length_profiles.json
 │   ├── manim_service.py              # Manim CLI execution, S3 upload integration
 │   ├── s3_service.py                 # ⚠️ AWS S3 upload + CloudFront signed URL generation
 │   ├── database.py                   # MongoDB connection management (Motor async)
 │   ├── models.py                     # Pydantic schemas for chat documents
 │   ├── temp/                         # 🔄 Temporary Python scripts (auto-cleaned)
 │   │   └── .gitkeep
+│   ├── tests/                        # Backend unit tests
 │   └── venv/                         # 🔄 Python virtual environment
 │
 ├── private_key.pem                   # ⚠️🔒 CloudFront RSA private key (DO NOT COMMIT)
@@ -745,11 +753,13 @@ echo "=== MongoDB ===" && docker exec pta-mongo mongosh --eval "db.adminCommand(
 flowchart LR
     A["👤 User Input"] --> B["🖥️ Frontend"]
     B -->|"POST /generate-stream"| C["⚙️ Backend API"]
-    C --> D["📝 Prompt Engineering"]
-    D --> E["🤖 Groq LLM"]
-    E -->|"Python Code"| F["🎬 Manim Render"]
-    F -->|"MP4 Video"| G["📁 Storage"]
-    G --> H["🎥 Video Player"]
+    C --> D["🧭 Compose Scenes (LLM Pass 1)"]
+    D --> E["🧠 Generate Code (LLM Pass 2)"]
+    E --> F["✅ Strict Validation Gate"]
+    F -->|"Auto-repair (max 2 retries)"| E
+    F -->|"Python Code"| G["🎬 Manim Render"]
+    G -->|"MP4 Video"| H["📁 Storage"]
+    H --> I["🎥 Video Player"]
 ```
 
 ### SSE Progress Steps
@@ -759,21 +769,20 @@ The `/generate-stream` endpoint sends **6 progress updates** via Server-Sent Eve
 | Step | Status | Description |
 |:-----|:-------|:------------|
 | 1 | `analyzing` | Analyzing your prompt |
-| 2 | `generating` | Generating Manim code via LLM |
-| 3 | `code_ready` | Code generated successfully |
-| 4 | `rendering` | Rendering animation frames (slowest step) |
-| 5 | `finalizing` | Encoding final video |
+| 2 | `composing` | Building internal scene-by-scene plan |
+| 3 | `generating` | Generating Manim code from scene plan |
+| 4 | `validating` / `repairing` | Strict quality checks and auto-fix attempts |
+| 5 | `rendering` / `finalizing` | Rendering + upload/finalization |
 | 6 | `complete` | Video ready! Returns `video_url` and `code` |
 
 ### Duration Mapping
 
 | Selection | Target Duration | LLM Instructions |
 |:----------|:----------------|:-----------------|
-| **Short (5s)** | 5-10 seconds | Single visual impact, minimal text |
-| **Medium (15s)** | 15-20 seconds | 2-3 clear steps, moderate pacing |
-| **Long (1m)** | 55-70 seconds | 4-5 sections, detailed step-by-step |
-| **Deep Dive (2m+)** | 110-130 seconds (min 110s) | 6 full sections with examples, 30+ wait calls |
-| **Extended (5m)** | 280-320 seconds | 8 sections, university mini-lecture, 80+ wait calls |
+| **Medium (15s)** | 15-20 seconds | ~2 sections, concise reveal, min 6 `wait()` calls |
+| **Long (1m)** | 55-65 seconds | ~5 sections, worked explanation, min 25 `wait()` calls |
+| **Deep Dive (2m)** | 110-130 seconds | ~6 sections, deep walkthrough, min 40 `wait()` calls |
+| **Extended (5m)** | 280-320 seconds | ~8 sections, lecture style pacing, min 80 `wait()` calls |
 
 ---
 
@@ -830,13 +839,17 @@ Streaming endpoint using Server-Sent Events (SSE).
 ```
 data: {"step": 1, "status": "analyzing", "message": "Analyzing your prompt..."}
 
-data: {"step": 2, "status": "generating", "message": "Generating Manim code..."}
+data: {"step": 2, "status": "composing", "message": "Composing internal scene plan..."}
 
-data: {"step": 3, "status": "code_ready", "message": "Code generated successfully!"}
+data: {"step": 3, "status": "generating", "message": "Generating Manim code from scene plan..."}
 
-data: {"step": 4, "status": "rendering", "message": "Rendering animation frames..."}
+data: {"step": 4, "status": "validating", "message": "Validating generated code..."}
 
-data: {"step": 5, "status": "finalizing", "message": "Finalizing video..."}
+data: {"step": 4, "status": "repairing", "message": "Repairing invalid code (attempt 1/2)..."}
+
+data: {"step": 5, "status": "rendering", "message": "Rendering at 1080p..."}
+
+data: {"step": 5, "status": "finalizing", "message": "Uploading to cloud storage..."}
 
 data: {"step": 6, "status": "complete", "message": "Video ready!", "video_url": "...", "code": "...", "chat_id": "..."}
 ```
@@ -975,6 +988,25 @@ llm = ChatGroq(
     temperature=0.2  # 0.0 = deterministic, 1.0 = creative (default: 0.2)
 )
 ```
+
+### Prompt Assets and Validation Gate
+
+Runtime prompt behavior is versioned under `backend/prompts/`:
+
+- `composer_system.md` - scene composition instructions (Pass 1)
+- `codegen_system.md` - code generation instructions (Pass 2)
+- `repair_system.md` - targeted repair instructions
+- `length_profiles.json` - duration and pacing constraints by length
+
+The backend enforces a strict validation gate before rendering:
+
+- Syntax validation (`ast.parse`)
+- Required `from manim import *`
+- Required `GenScene` scene class
+- `wait()` pacing thresholds per selected length
+- Anti-pattern checks (for example, raw mobjects in `self.play(...)`)
+- Unicode math symbol checks inside `MathTex`/`Tex`
+- Automatic repair retries (max 2) before hard failure
 
 ### Clerk Appearance
 

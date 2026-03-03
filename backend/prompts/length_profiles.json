@@ -1,0 +1,34 @@
+{
+  "default_length": "Medium (15s)",
+  "profiles": {
+    "Medium (15s)": {
+      "target_seconds_min": 15,
+      "target_seconds_max": 20,
+      "minimum_wait_calls": 6,
+      "sections_hint": 2,
+      "summary": "Short explainer with title, core visual build, and concise payoff."
+    },
+    "Long (1m)": {
+      "target_seconds_min": 55,
+      "target_seconds_max": 65,
+      "minimum_wait_calls": 18,
+      "sections_hint": 5,
+      "summary": "Structured explainer with intro, core idea, worked visual example, and recap."
+    },
+    "Deep Dive (2m)": {
+      "target_seconds_min": 110,
+      "target_seconds_max": 130,
+      "minimum_wait_calls": 30,
+      "sections_hint": 6,
+      "summary": "Detailed walkthrough with two mechanism phases, demo, and full recap."
+    },
+    "Extended (5m)": {
+      "target_seconds_min": 280,
+      "target_seconds_max": 320,
+      "minimum_wait_calls": 55,
+      "sections_hint": 8,
+      "summary": "Lecture-style narrative with motivation, foundations, deep explanation, applications, and summary."
+    }
+  }
+}
+

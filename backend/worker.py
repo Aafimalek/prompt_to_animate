@@ -23,7 +23,7 @@ sys.path.insert(0, str(project_root))
 from dotenv import load_dotenv
 load_dotenv()
 
-from rq import Worker, Queue
+from rq import Worker, Queue, SimpleWorker
 from rq.job import Job
 from backend.redis_utils import get_raw_redis_connection
 
@@ -62,15 +62,21 @@ def run_worker():
     # Create queues to listen to
     queues = [Queue('default', connection=redis_conn)]
     
+    # RQ's default Worker uses os.fork(), which is unavailable on Windows.
+    worker_cls = SimpleWorker if os.name == "nt" else Worker
+
     # Create worker with configuration
-    worker = Worker(
+    worker = worker_cls(
         queues,
         connection=redis_conn,
         name=f"worker-{os.getpid()}",
         log_job_description=True
     )
     
-    logger.info(f"👷 Worker '{worker.name}' listening on queue: default")
+    logger.info(
+        f"👷 Worker '{worker.name}' listening on queue: default "
+        f"(class={worker_cls.__name__})"
+    )
     logger.info("Press Ctrl+C to stop...")
     
     # Start working
