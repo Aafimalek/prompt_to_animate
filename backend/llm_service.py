@@ -47,11 +47,23 @@ PROMPT_FILES = {
     "codegen_system": "codegen_system.md",
     "repair_system": "repair_system.md",
     "runtime_repair_system": "runtime_repair_system.md",
+    "visual_repair_system": "visual_repair_system.md",
     "length_profiles": "length_profiles.json",
 }
 
 SCENE_PLAN_REQUIRED_KEYS = {"title", "hook", "narrative_arc", "scenes"}
-SCENE_REQUIRED_KEYS = {"name", "purpose", "duration_seconds", "visuals", "technical_notes"}
+SCENE_REQUIRED_KEYS = {
+    "name",
+    "purpose",
+    "duration_seconds",
+    "visuals",
+    "technical_notes",
+    "layout_zone",
+    "camera_strategy",
+    "max_concurrent_text_blocks",
+    "clear_policy",
+    "focus_targets",
+}
 ALLOWED_SCENE_BASES = {"Scene", "ThreeDScene", "MovingCameraScene"}
 FORBIDDEN_MATH_UNICODE = {
     "\u00d7": "\\times",
@@ -100,6 +112,22 @@ ProgressCallback = Optional[Callable[[str, str], None]]
 
 RETRYABLE_STATUS_CODES = {408, 409, 429, 500, 502, 503, 504}
 
+ALLOWED_LAYOUT_ZONES = {
+    "golden",
+    "top_title_center_visual_bottom_formula",
+    "center_focus",
+    "split_left_right",
+    "grid",
+    "full_frame",
+}
+ALLOWED_CLEAR_POLICIES = {"fade_out", "clear", "retain"}
+ALLOWED_CAMERA_STRATEGIES = {
+    "static",
+    "moving_auto_zoom",
+    "manual_zoom_pan",
+    "3d_orbit",
+}
+
 
 def _load_int_env(name: str, default: int, minimum: int) -> int:
     raw_value = os.environ.get(name)
@@ -123,6 +151,21 @@ def _load_float_env(name: str, default: float, minimum: float) -> float:
         print(f"Warning: invalid float for {name}='{raw_value}', using default {default}")
         return default
     return max(minimum, value)
+
+
+def _load_bool_env(name: str, default: bool) -> bool:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+
+    normalized = raw_value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+
+    print(f"Warning: invalid boolean for {name}='{raw_value}', using default {default}")
+    return default
 
 
 def _parse_fallback_models(raw_value: str) -> List[str]:
@@ -154,6 +197,21 @@ LLM_RETRY_BASE_SECONDS = _load_float_env("LLM_RETRY_BASE_SECONDS", default=1.0, 
 LLM_RETRY_MAX_SECONDS = _load_float_env("LLM_RETRY_MAX_SECONDS", default=12.0, minimum=0.1)
 if LLM_RETRY_MAX_SECONDS < LLM_RETRY_BASE_SECONDS:
     LLM_RETRY_MAX_SECONDS = LLM_RETRY_BASE_SECONDS
+
+MANIM_VISUAL_QA_ENABLED = _load_bool_env("MANIM_VISUAL_QA_ENABLED", default=False)
+_visual_qa_mode_raw = (os.environ.get("MANIM_VISUAL_QA_MODE", "balanced") or "").strip().lower()
+if _visual_qa_mode_raw not in {"balanced", "max"}:
+    print(
+        f"Warning: invalid MANIM_VISUAL_QA_MODE='{_visual_qa_mode_raw}', defaulting to 'balanced'"
+    )
+    _visual_qa_mode_raw = "balanced"
+MANIM_VISUAL_QA_MODE = _visual_qa_mode_raw
+_default_visual_repairs = 1 if MANIM_VISUAL_QA_MODE == "balanced" else 2
+MANIM_VISUAL_QA_MAX_REPAIRS = _load_int_env(
+    "MANIM_VISUAL_QA_MAX_REPAIRS",
+    default=_default_visual_repairs,
+    minimum=0,
+)
 
 # Unified candidate list: Azure OpenAI first, then Groq, then Cerebras as fallback
 MODEL_CANDIDATES: List[Tuple[str, str]] = []
@@ -463,10 +521,53 @@ def _normalize_scene_plan(scene_plan: Dict[str, Any]) -> Dict[str, Any]:
 
         visuals = scene.get("visuals")
         technical_notes = scene.get("technical_notes")
+        focus_targets = scene.get("focus_targets")
         if not isinstance(visuals, list) or not visuals:
             raise ValueError(f"Scene #{index} must include non-empty visuals list")
         if not isinstance(technical_notes, list) or not technical_notes:
             raise ValueError(f"Scene #{index} must include non-empty technical_notes list")
+        if not isinstance(focus_targets, list) or not focus_targets:
+            raise ValueError(f"Scene #{index} must include non-empty focus_targets list")
+
+        layout_zone = str(scene.get("layout_zone", "")).strip()
+        if not layout_zone:
+            raise ValueError(f"Scene #{index} has empty layout_zone")
+        if layout_zone not in ALLOWED_LAYOUT_ZONES:
+            raise ValueError(
+                f"Scene #{index} layout_zone '{layout_zone}' must be one of: "
+                + ", ".join(sorted(ALLOWED_LAYOUT_ZONES))
+            )
+
+        camera_strategy = str(scene.get("camera_strategy", "")).strip()
+        if not camera_strategy:
+            raise ValueError(f"Scene #{index} has empty camera_strategy")
+        if camera_strategy not in ALLOWED_CAMERA_STRATEGIES:
+            raise ValueError(
+                f"Scene #{index} camera_strategy '{camera_strategy}' must be one of: "
+                + ", ".join(sorted(ALLOWED_CAMERA_STRATEGIES))
+            )
+
+        clear_policy = str(scene.get("clear_policy", "")).strip()
+        if not clear_policy:
+            raise ValueError(f"Scene #{index} has empty clear_policy")
+        if clear_policy not in ALLOWED_CLEAR_POLICIES:
+            raise ValueError(
+                f"Scene #{index} clear_policy '{clear_policy}' must be one of: "
+                + ", ".join(sorted(ALLOWED_CLEAR_POLICIES))
+            )
+
+        try:
+            max_concurrent_text_blocks = int(scene["max_concurrent_text_blocks"])
+        except (TypeError, ValueError):
+            raise ValueError(f"Scene #{index} has invalid max_concurrent_text_blocks")
+        if max_concurrent_text_blocks <= 0:
+            raise ValueError(f"Scene #{index} max_concurrent_text_blocks must be > 0")
+
+        normalized_focus_targets = [
+            str(item).strip() for item in focus_targets if str(item).strip()
+        ]
+        if not normalized_focus_targets:
+            raise ValueError(f"Scene #{index} must include non-empty focus_targets values")
 
         normalized_scenes.append(
             {
@@ -477,6 +578,11 @@ def _normalize_scene_plan(scene_plan: Dict[str, Any]) -> Dict[str, Any]:
                 "technical_notes": [
                     str(item).strip() for item in technical_notes if str(item).strip()
                 ],
+                "layout_zone": layout_zone,
+                "camera_strategy": camera_strategy,
+                "max_concurrent_text_blocks": max_concurrent_text_blocks,
+                "clear_policy": clear_policy,
+                "focus_targets": normalized_focus_targets,
                 # Pass through optional enriched fields from the composer
                 **({"emotional_beat": str(scene["emotional_beat"]).strip()} if "emotional_beat" in scene else {}),
                 **({"animations": [str(a).strip() for a in scene["animations"] if str(a).strip()]} if isinstance(scene.get("animations"), list) else {}),
@@ -499,7 +605,10 @@ def _format_scene_plan_schema_hint() -> str:
         '{"title":"string","hook":"string","narrative_arc":"string",'
         '"scenes":[{"name":"string","purpose":"string",'
         '"duration_seconds":10,"visuals":["string"],'
-        '"technical_notes":["string"]}]}'
+        '"technical_notes":["string"],'
+        '"layout_zone":"golden","camera_strategy":"static",'
+        '"max_concurrent_text_blocks":3,"clear_policy":"fade_out",'
+        '"focus_targets":["string"]}]}'
     )
 
 
@@ -1222,9 +1331,120 @@ async def repair_code_from_runtime_error(
     repaired_code = _apply_all_auto_fixes(repaired_code, length)
 
     errors = validate_code(repaired_code, length)
+    if errors and all(item.startswith("Insufficient pacing:") for item in errors):
+        repaired_code = _force_pad_wait_calls(repaired_code, length)
+        errors = validate_code(repaired_code, length)
+
     if errors:
         raise ValueError(
             "Runtime repair produced invalid code: " + _summarize_errors(errors)
+        )
+    return repaired_code
+
+
+def run_visual_quality_check_for_code(code: str, mode: str) -> Dict[str, Any]:
+    """Run visual QA in a low-quality preflight render and return a structured report."""
+    from .manim_service import run_visual_quality_check
+
+    return run_visual_quality_check(code=code, mode=mode)
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_quality_report(report: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(report, dict):
+        return {
+            "passed": False,
+            "score": 0,
+            "error_count": 1,
+            "warning_count": 0,
+            "issues": [
+                {
+                    "severity": "error",
+                    "issue_type": "quality_report_invalid",
+                    "message": "Visual quality report has invalid structure",
+                    "frame_index": -1,
+                    "details": {},
+                }
+            ],
+            "metrics": {},
+        }
+
+    normalized = {
+        "passed": bool(report.get("passed", False)),
+        "score": int(report.get("score", 0)),
+        "error_count": int(report.get("error_count", 0)),
+        "warning_count": int(report.get("warning_count", 0)),
+        "issues": [],
+        "metrics": report.get("metrics", {}) if isinstance(report.get("metrics"), dict) else {},
+    }
+
+    issues = report.get("issues")
+    if isinstance(issues, list):
+        for issue in issues:
+            if not isinstance(issue, dict):
+                continue
+            normalized["issues"].append(
+                {
+                    "severity": str(issue.get("severity", "warning")),
+                    "issue_type": str(issue.get("issue_type", "unspecified")),
+                    "message": str(issue.get("message", "Unspecified quality issue")),
+                    "frame_index": _safe_int(issue.get("frame_index", -1), default=-1),
+                    "details": issue.get("details", {}) if isinstance(issue.get("details"), dict) else {},
+                }
+            )
+    return normalized
+
+
+async def repair_code_from_visual_issues(
+    prompt: str,
+    length: str,
+    scene_plan: Dict[str, Any],
+    bad_code: str,
+    quality_report: Dict[str, Any],
+) -> str:
+    profile = get_length_profile(length)
+    prompt_template = ChatPromptTemplate.from_messages(
+        [
+            SystemMessage(content=PROMPT_ASSETS["visual_repair_system"]),
+            (
+                "human",
+                "User prompt:\n{prompt}\n\n"
+                "Length selection: {length_name}\n"
+                "Length profile JSON:\n{length_profile_json}\n\n"
+                "Scene plan JSON:\n{scene_plan_json}\n\n"
+                "Visual QA report JSON:\n{quality_report_json}\n\n"
+                "Current code:\n{bad_code}\n\n"
+                "Fix all visual quality issues while preserving narrative flow.\n"
+                "Return corrected executable code only.",
+            ),
+        ]
+    )
+
+    raw_response = await _invoke_with_resilience(
+        prompt_template,
+        {
+            "prompt": prompt,
+            "length_name": profile["length_name"],
+            "length_profile_json": json.dumps(profile, indent=2),
+            "scene_plan_json": json.dumps(scene_plan, indent=2),
+            "quality_report_json": json.dumps(_normalize_quality_report(quality_report), indent=2),
+            "bad_code": bad_code,
+        },
+        operation="repair_code_from_visual_issues",
+    )
+
+    repaired_code = sanitize_generated_code(raw_response)
+    repaired_code = _apply_all_auto_fixes(repaired_code, length)
+    errors = validate_code(repaired_code, length)
+    if errors:
+        raise ValueError(
+            "Visual repair produced invalid code: " + _summarize_errors(errors)
         )
     return repaired_code
 
@@ -1294,6 +1514,69 @@ def _auto_pad_wait_calls(code: str, length: str) -> str:
         lines.insert(pos + 1, pad_line)
         inserted += 1
 
+    return "\n".join(lines)
+
+
+def _force_pad_wait_calls(code: str, length: str) -> str:
+    """Force insert wait() calls near the end of construct() to satisfy pacing.
+
+    Unlike `_auto_pad_wait_calls`, this fallback does not require nearby
+    `self.play(...)` lines. It appends waits at the tail of construct() when
+    runtime-repaired code still fails pacing validation.
+    """
+    min_wait = int(get_length_profile(length).get("minimum_wait_calls", 0))
+    if min_wait <= 0:
+        return code
+
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return code
+
+    current_waits = _count_wait_calls(tree)
+    deficit = min_wait - current_waits
+    if deficit <= 0:
+        return code
+
+    lines = code.split("\n")
+
+    def _indent_of(line: str) -> int:
+        return len(line) - len(line.lstrip())
+
+    construct_index = -1
+    construct_indent = 0
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("def construct(") and stripped.endswith(":"):
+            construct_index = i
+            construct_indent = _indent_of(line)
+            break
+
+    if construct_index < 0:
+        return code
+
+    body_indent = construct_indent + 4
+    for j in range(construct_index + 1, len(lines)):
+        stripped = lines[j].strip()
+        if not stripped:
+            continue
+        line_indent = _indent_of(lines[j])
+        if line_indent > construct_indent:
+            body_indent = line_indent
+            break
+
+    insert_at = len(lines)
+    for k in range(construct_index + 1, len(lines)):
+        stripped = lines[k].strip()
+        if not stripped:
+            continue
+        if _indent_of(lines[k]) <= construct_indent:
+            insert_at = k
+            break
+
+    wait_line = " " * body_indent + "self.wait(1)"
+    padding = [wait_line for _ in range(deficit)]
+    lines[insert_at:insert_at] = padding
     return "\n".join(lines)
 
 
@@ -1427,6 +1710,71 @@ async def generate_manim_code(
         raise ValueError(
             "Code validation failed after 2 repair attempts: " + _summarize_errors(errors)
         )
+
+    if MANIM_VISUAL_QA_ENABLED:
+        quality_attempt = 0
+        while True:
+            _emit_progress(
+                progress_callback,
+                "quality_checking",
+                "Running visual quality checks...",
+            )
+            try:
+                quality_report = run_visual_quality_check_for_code(
+                    code=code,
+                    mode=MANIM_VISUAL_QA_MODE,
+                )
+            except Exception as exc:
+                quality_report = {
+                    "passed": False,
+                    "score": 0,
+                    "error_count": 1,
+                    "warning_count": 0,
+                    "issues": [
+                        {
+                            "severity": "error",
+                            "issue_type": "qa_render_failure",
+                            "message": str(exc),
+                            "frame_index": -1,
+                            "details": {},
+                        }
+                    ],
+                    "metrics": {},
+                }
+
+            quality_report = _normalize_quality_report(quality_report)
+            if quality_report["passed"]:
+                break
+
+            if quality_attempt >= MANIM_VISUAL_QA_MAX_REPAIRS:
+                raise ValueError(
+                    "Visual quality gate failed: "
+                    + _summarize_errors(
+                        [
+                            issue["message"]
+                            for issue in quality_report["issues"]
+                            if issue.get("severity") == "error"
+                        ]
+                        or ["Visual score below threshold"]
+                    )
+                )
+
+            quality_attempt += 1
+            _emit_progress(
+                progress_callback,
+                "quality_repairing",
+                (
+                    f"Repairing visual layout (attempt {quality_attempt}/"
+                    f"{MANIM_VISUAL_QA_MAX_REPAIRS})..."
+                ),
+            )
+            code = await repair_code_from_visual_issues(
+                prompt=prompt,
+                length=length,
+                scene_plan=scene_plan,
+                bad_code=code,
+                quality_report=quality_report,
+            )
 
     return code
 

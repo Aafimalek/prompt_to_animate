@@ -101,6 +101,8 @@ def process_video_generation(
                 "validating": 4,
                 "repairing": 4,
                 "repairing_runtime": 4,
+                "quality_checking": 4,
+                "quality_repairing": 4,
             }
             step = step_map.get(status, 4)
             report_progress(redis_conn, job_id, step, status, message)
@@ -132,13 +134,19 @@ def process_video_generation(
             )
 
             try:
-                s3_key, local_filename = execute_manim_code(code, resolution=resolution)
+                s3_key, local_filename = execute_manim_code(
+                    code,
+                    resolution=resolution,
+                    length=length,
+                )
                 break
             except Exception as render_error:
                 render_error_text = str(render_error)
+                is_timeout_error = "TimeoutError" in render_error_text
                 can_attempt_repair = (
                     render_attempt < max_render_repairs
                     and render_error_text.startswith("Code error")
+                    and not is_timeout_error
                 )
                 if not can_attempt_repair:
                     raise

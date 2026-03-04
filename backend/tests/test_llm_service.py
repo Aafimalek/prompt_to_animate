@@ -18,6 +18,27 @@ class GenScene(Scene):
 """
 
 
+VALID_SCENE_PLAN = {
+    "title": "Demo",
+    "hook": "Hook",
+    "narrative_arc": "Arc",
+    "scenes": [
+        {
+            "name": "Scene 1",
+            "purpose": "Purpose",
+            "duration_seconds": 15,
+            "visuals": ["Circle"],
+            "technical_notes": ["Use Create"],
+            "layout_zone": "golden",
+            "camera_strategy": "static",
+            "max_concurrent_text_blocks": 3,
+            "clear_policy": "fade_out",
+            "focus_targets": ["circle"],
+        }
+    ],
+}
+
+
 def test_sanitize_generated_code_removes_think_and_fences():
     raw = """<think>internal reasoning</think>
 ```python
@@ -124,20 +145,7 @@ class GenScene(Scene):
 
 def test_generate_manim_code_repairs_after_first_invalid_attempt(monkeypatch):
     async def fake_compose_scene_plan(prompt: str, length: str):
-        return {
-            "title": "Demo",
-            "hook": "Hook",
-            "narrative_arc": "Arc",
-            "scenes": [
-                {
-                    "name": "Scene 1",
-                    "purpose": "Purpose",
-                    "duration_seconds": 15,
-                    "visuals": ["Circle"],
-                    "technical_notes": ["Use Create"],
-                }
-            ],
-        }
+        return VALID_SCENE_PLAN
 
     async def fake_generate_code_from_plan(prompt: str, length: str, scene_plan):
         return """from manim import *
@@ -175,20 +183,7 @@ class GenScene(Scene):
 
 def test_generate_manim_code_fails_after_two_repairs(monkeypatch):
     async def fake_compose_scene_plan(prompt: str, length: str):
-        return {
-            "title": "Demo",
-            "hook": "Hook",
-            "narrative_arc": "Arc",
-            "scenes": [
-                {
-                    "name": "Scene 1",
-                    "purpose": "Purpose",
-                    "duration_seconds": 15,
-                    "visuals": ["Circle"],
-                    "technical_notes": ["Use Create"],
-                }
-            ],
-        }
+        return VALID_SCENE_PLAN
 
     async def fake_generate_code_from_plan(prompt: str, length: str, scene_plan):
         return "class Broken: pass"
@@ -359,3 +354,137 @@ def test_repair_code_from_runtime_error_rejects_invalid_code(monkeypatch):
     except ValueError as exc:
         assert "Runtime repair produced invalid code" in str(exc)
 
+
+def test_force_pad_wait_calls_adds_missing_waits():
+    code = """from manim import *
+
+class GenScene(Scene):
+    def construct(self):
+        self.play(Create(Circle()))
+        self.wait(1)
+"""
+    patched = llm_service._force_pad_wait_calls(code, "Extended (5m)")
+    waits = patched.count("self.wait(")
+    assert waits >= 55
+
+
+def test_normalize_scene_plan_requires_layout_fields():
+    bad_plan = {
+        "title": "Demo",
+        "hook": "Hook",
+        "narrative_arc": "Arc",
+        "scenes": [
+            {
+                "name": "S",
+                "purpose": "P",
+                "duration_seconds": 15,
+                "visuals": ["Circle"],
+                "technical_notes": ["Use Create"],
+            }
+        ],
+    }
+    try:
+        llm_service._normalize_scene_plan(bad_plan)
+        assert False, "Expected ValueError"
+    except ValueError as exc:
+        assert "missing keys" in str(exc)
+
+
+def test_generate_manim_code_visual_qa_repairs_once(monkeypatch):
+    async def fake_compose_scene_plan(prompt: str, length: str):
+        return VALID_SCENE_PLAN
+
+    async def fake_generate_code_from_plan(prompt: str, length: str, scene_plan):
+        return VALID_MEDIUM_CODE
+
+    reports = [
+        {
+            "passed": False,
+            "score": 60,
+            "error_count": 1,
+            "warning_count": 0,
+            "issues": [
+                {
+                    "severity": "error",
+                    "issue_type": "out_of_frame",
+                    "message": "Text is out of frame",
+                    "frame_index": 0,
+                    "details": {},
+                }
+            ],
+            "metrics": {},
+        },
+        {
+            "passed": True,
+            "score": 95,
+            "error_count": 0,
+            "warning_count": 1,
+            "issues": [],
+            "metrics": {},
+        },
+    ]
+
+    def fake_visual_qa(code: str, mode: str):
+        return reports.pop(0)
+
+    async def fake_visual_repair(prompt: str, length: str, scene_plan, bad_code: str, quality_report):
+        return VALID_MEDIUM_CODE
+
+    monkeypatch.setattr(llm_service, "compose_scene_plan", fake_compose_scene_plan)
+    monkeypatch.setattr(llm_service, "generate_code_from_plan", fake_generate_code_from_plan)
+    monkeypatch.setattr(llm_service, "run_visual_quality_check_for_code", fake_visual_qa)
+    monkeypatch.setattr(llm_service, "repair_code_from_visual_issues", fake_visual_repair)
+    monkeypatch.setattr(llm_service, "MANIM_VISUAL_QA_ENABLED", True)
+    monkeypatch.setattr(llm_service, "MANIM_VISUAL_QA_MAX_REPAIRS", 1)
+    monkeypatch.setattr(llm_service, "MANIM_VISUAL_QA_MODE", "balanced")
+
+    result = asyncio.run(
+        llm_service.generate_manim_code(
+            prompt="Explain circles",
+            length="Medium (15s)",
+        )
+    )
+    assert result.startswith("from manim import *")
+
+
+def test_generate_manim_code_visual_qa_failure_after_retry(monkeypatch):
+    async def fake_compose_scene_plan(prompt: str, length: str):
+        return VALID_SCENE_PLAN
+
+    async def fake_generate_code_from_plan(prompt: str, length: str, scene_plan):
+        return VALID_MEDIUM_CODE
+
+    def fake_visual_qa(code: str, mode: str):
+        return {
+            "passed": False,
+            "score": 50,
+            "error_count": 1,
+            "warning_count": 0,
+            "issues": [
+                {
+                    "severity": "error",
+                    "issue_type": "text_overlap",
+                    "message": "Text overlap ratio 0.45",
+                    "frame_index": 1,
+                    "details": {},
+                }
+            ],
+            "metrics": {},
+        }
+
+    async def fake_visual_repair(prompt: str, length: str, scene_plan, bad_code: str, quality_report):
+        return VALID_MEDIUM_CODE
+
+    monkeypatch.setattr(llm_service, "compose_scene_plan", fake_compose_scene_plan)
+    monkeypatch.setattr(llm_service, "generate_code_from_plan", fake_generate_code_from_plan)
+    monkeypatch.setattr(llm_service, "run_visual_quality_check_for_code", fake_visual_qa)
+    monkeypatch.setattr(llm_service, "repair_code_from_visual_issues", fake_visual_repair)
+    monkeypatch.setattr(llm_service, "MANIM_VISUAL_QA_ENABLED", True)
+    monkeypatch.setattr(llm_service, "MANIM_VISUAL_QA_MAX_REPAIRS", 1)
+    monkeypatch.setattr(llm_service, "MANIM_VISUAL_QA_MODE", "balanced")
+
+    try:
+        asyncio.run(llm_service.generate_manim_code("Bad", "Medium (15s)"))
+        assert False, "Expected ValueError"
+    except ValueError as exc:
+        assert "Visual quality gate failed" in str(exc)

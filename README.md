@@ -167,7 +167,7 @@ sequenceDiagram
     B->>G: Generate code from plan (Pass 2)
     B->>F: SSE: Step 3 - Generating code
     G-->>B: Return Python code
-    B->>F: SSE: Step 4 - Validating / repairing code
+    B->>F: SSE: Step 4 - Validating / repairing / visual QA
     
     B->>M: Execute manim -qh script.py
     B->>F: SSE: Step 5 - Rendering / finalizing
@@ -528,6 +528,10 @@ CLOUDFRONT_PRIVATE_KEY_BASE64=your_base64_encoded_private_key
 REDIS_URL=rediss://your_upstash_redis_url
 MONGODB_URI=mongodb+srv://your_mongodb_atlas_uri
 MONGODB_DATABASE=prompt_to_animate
+MANIM_VISUAL_QA_ENABLED=false
+MANIM_VISUAL_QA_MODE=balanced
+MANIM_VISUAL_QA_MAX_REPAIRS=1
+MANIM_VISUAL_QA_LOG_ARTIFACTS=false
 ```
 
 ### Vercel Frontend Setup
@@ -771,7 +775,7 @@ The `/generate-stream` endpoint sends **6 progress updates** via Server-Sent Eve
 | 1 | `analyzing` | Analyzing your prompt |
 | 2 | `composing` | Building internal scene-by-scene plan |
 | 3 | `generating` | Generating Manim code from scene plan |
-| 4 | `validating` / `repairing` | Strict quality checks and auto-fix attempts |
+| 4 | `validating` / `repairing` / `quality_checking` / `quality_repairing` | Static validation plus optional visual QA and repair |
 | 5 | `rendering` / `finalizing` | Rendering + upload/finalization |
 | 6 | `complete` | Video ready! Returns `video_url` and `code` |
 
@@ -846,6 +850,10 @@ data: {"step": 3, "status": "generating", "message": "Generating Manim code from
 data: {"step": 4, "status": "validating", "message": "Validating generated code..."}
 
 data: {"step": 4, "status": "repairing", "message": "Repairing invalid code (attempt 1/2)..."}
+
+data: {"step": 4, "status": "quality_checking", "message": "Running visual quality checks..."}
+
+data: {"step": 4, "status": "quality_repairing", "message": "Repairing visual layout (attempt 1/1)..."}
 
 data: {"step": 5, "status": "rendering", "message": "Rendering at 1080p..."}
 
@@ -996,6 +1004,8 @@ Runtime prompt behavior is versioned under `backend/prompts/`:
 - `composer_system.md` - scene composition instructions (Pass 1)
 - `codegen_system.md` - code generation instructions (Pass 2)
 - `repair_system.md` - targeted repair instructions
+- `runtime_repair_system.md` - runtime failure focused repair prompt
+- `visual_repair_system.md` - visual-quality focused repair prompt
 - `length_profiles.json` - duration and pacing constraints by length
 
 The backend enforces a strict validation gate before rendering:
@@ -1007,6 +1017,33 @@ The backend enforces a strict validation gate before rendering:
 - Anti-pattern checks (for example, raw mobjects in `self.play(...)`)
 - Unicode math symbol checks inside `MathTex`/`Tex`
 - Automatic repair retries (max 2) before hard failure
+
+Visual quality gate (feature flagged):
+
+- Optional low-quality QA render pass before final render
+- Out-of-frame text detection
+- Text overlap detection
+- Crowding warnings and score-based pass/fail (`score >= 85`, zero visual errors)
+- Optional one visual repair retry in `balanced` mode
+
+Visual QA environment flags:
+
+- `MANIM_VISUAL_QA_ENABLED=false`
+- `MANIM_VISUAL_QA_MODE=balanced` (`balanced` or `max`)
+- `MANIM_VISUAL_QA_MAX_REPAIRS=1`
+- `MANIM_VISUAL_QA_LOG_ARTIFACTS=false`
+
+Render/runtime environment flags:
+
+- `MANIM_RENDER_TIMEOUT_SECONDS=180` (base timeout floor)
+- `MANIM_RENDER_TIMEOUT_MAX_SECONDS=3600` (hard cap)
+- `MANIM_TEMP_DIR=<optional path>` (avoid writing temp render scripts under watched source dirs)
+
+Benchmark harness:
+
+- Prompt suite: `backend/benchmarks/prompt_suite.json` (30 prompts)
+- Runner: `python -m backend.benchmarks.run_visual_quality_benchmark --qa-mode balanced`
+- Report output: `backend/benchmarks/last_benchmark_report.json`
 
 ### Clerk Appearance
 

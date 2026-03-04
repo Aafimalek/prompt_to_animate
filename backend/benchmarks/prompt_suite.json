@@ -1,0 +1,37 @@
+﻿[
+  {"length": "Medium (15s)", "prompt": "Visualize why the area of a circle is pi r squared."},
+  {"length": "Medium (15s)", "prompt": "Show the Pythagorean theorem with a right triangle and colored squares."},
+  {"length": "Medium (15s)", "prompt": "Explain slope as rise over run with a line on axes."},
+  {"length": "Medium (15s)", "prompt": "Illustrate vector addition tip-to-tail in 2D."},
+  {"length": "Medium (15s)", "prompt": "Show how a fraction bar represents division."},
+
+  {"length": "Long (1m)", "prompt": "Explain derivatives with a moving tangent line on a parabola."},
+  {"length": "Long (1m)", "prompt": "Teach integration as area accumulation using Riemann rectangles."},
+  {"length": "Long (1m)", "prompt": "Demonstrate matrix multiplication as linear transformations."},
+  {"length": "Long (1m)", "prompt": "Explain Bayes theorem with probability boxes and updates."},
+  {"length": "Long (1m)", "prompt": "Visualize eigenvectors and eigenvalues under transformation."},
+
+  {"length": "Deep Dive (2m)", "prompt": "Build intuition for Fourier series by summing sine waves."},
+  {"length": "Deep Dive (2m)", "prompt": "Explain gradient descent on a loss surface with parameter updates."},
+  {"length": "Deep Dive (2m)", "prompt": "Show how logistic regression forms a decision boundary."},
+  {"length": "Deep Dive (2m)", "prompt": "Explain central limit theorem with repeated sampling histograms."},
+  {"length": "Deep Dive (2m)", "prompt": "Derive the quadratic formula step by step."},
+
+  {"length": "Extended (5m)", "prompt": "Complete walkthrough of merge sort with recursive splitting and merging."},
+  {"length": "Extended (5m)", "prompt": "Teach backpropagation for a small neural network with chain rule visuals."},
+  {"length": "Extended (5m)", "prompt": "Explain the dot product from geometric and algebraic viewpoints."},
+  {"length": "Extended (5m)", "prompt": "Show Markov chains and steady state convergence on a graph."},
+  {"length": "Extended (5m)", "prompt": "Explain singular value decomposition intuition with shape transforms."},
+
+  {"length": "Medium (15s)", "prompt": "Visualize a pendulum and label potential and kinetic energy."},
+  {"length": "Long (1m)", "prompt": "Explain Newton's second law with force and acceleration vectors."},
+  {"length": "Long (1m)", "prompt": "Show electric field lines around positive and negative charges."},
+  {"length": "Deep Dive (2m)", "prompt": "Explain wave interference with phase and amplitude diagrams."},
+  {"length": "Extended (5m)", "prompt": "Teach orbital motion basics with vectors and centripetal acceleration."},
+
+  {"length": "Medium (15s)", "prompt": "Show binary search narrowing down an index in a sorted array."},
+  {"length": "Long (1m)", "prompt": "Visualize stack push and pop operations over time."},
+  {"length": "Deep Dive (2m)", "prompt": "Explain Dijkstra shortest path algorithm with weighted graph updates."},
+  {"length": "Extended (5m)", "prompt": "Teach dynamic programming with a grid path counting example."},
+  {"length": "Long (1m)", "prompt": "Visualize hash table collisions and chaining."}
+]
