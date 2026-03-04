@@ -56,7 +56,8 @@ Lines & Arrows:
   DoubleArrow(start, end)
   Vector([x, y, 0])
   CurvedArrow(start, end, angle=PI/2)
-  Brace(mobject, direction) + brace.get_text("label")
+  Brace(mobject, direction) + brace.get_tex(r"\|a\| \cos\theta")  — math label
+  Brace(mobject, direction) + brace.get_text("plain label")        — text label only
 
 Text:
   Text("Hello", font_size=48, color=WHITE)
@@ -68,6 +69,15 @@ LaTeX (always use raw strings):
   Tex(r"The area is $A = \pi r^2$")          — mixed text+math
   MathTex("a", "^2", "+", "b", "^2")         — multi-part for coloring
   equation.set_color_by_tex("x", YELLOW)     — color by TeX substring
+
+LaTeX MODE RULES (CRITICAL — DVI errors if violated):
+  - MathTex() runs in MATH mode: use \frac, \vec, \cos, \theta freely.
+  - Tex() runs in TEXT mode: wrap math in $...$: Tex(r"Area = $\pi r^2$")
+  - Brace.get_text() creates Tex (TEXT mode): NEVER put math commands in it.
+    WRONG:  brace.get_text(r"\|a\| \cos(\theta)")   — DVI crash!
+    RIGHT:  brace.get_tex(r"\|a\| \cos(\theta)")    — math mode, works
+    RIGHT:  brace.get_text("projection length")      — plain text, works
+  - Text() is NOT LaTeX at all. Never put LaTeX commands in Text().
 
 Groups:
   VGroup(mob1, mob2, mob3)
@@ -283,6 +293,8 @@ API CORRECTNESS RULES
 - Always use raw strings for LaTeX: MathTex(r"\pi"), Tex(r"$e^x$").
 - No unicode math symbols in MathTex/Tex (use LaTeX commands instead).
 - No package-dependent LaTeX macros (e.g., \\checkmark). Use Text("OK") instead.
+- Brace.get_text() is TEXT mode — use brace.get_tex() for any math expressions.
+- Text() is Pango, not LaTeX. Never put LaTeX commands (\frac, \vec, etc.) in Text().
 - For 3D: always call self.set_camera_orientation() BEFORE adding 3D content.
 - Use VGroup (not Group) for collections of VMobjects.
 - Use .copy() when reusing a mobject that's already in the scene.

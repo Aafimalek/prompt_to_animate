@@ -15,14 +15,22 @@ from langchain_core.messages import SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
-from langchain_openai import ChatOpenAI
+from langchain_openai import AzureChatOpenAI, ChatOpenAI
 import openai as openai_mod
 
 # Load .env from project root
 env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
-# Groq (primary)
+# Azure OpenAI (primary)
+azure_openai_api_key = os.environ.get("AZURE_OPENAI_API_KEY", "").strip()
+azure_openai_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "").strip()
+azure_openai_deployment = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-5.2-chat").strip()
+azure_openai_api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview").strip()
+if not azure_openai_api_key or not azure_openai_endpoint:
+    print(f"Warning: AZURE_OPENAI_API_KEY or AZURE_OPENAI_ENDPOINT not found in environment. Checked path: {env_path}")
+
+# Groq (fallback)
 groq_api_key = os.environ.get("GROQ_API_KEY", "").strip()
 if not groq_api_key:
     print(f"Warning: GROQ_API_KEY not found in environment. Checked path: {env_path}")
@@ -95,6 +103,10 @@ RUNTIME_REPAIR_SYSTEM_PROMPT = (
     "Return executable code only, with no markdown fences or explanations.\n"
     "Preserve the original educational intent, visual design, and length pacing requirements.\n\n"
     "Common runtime fixes:\n"
+    "- LATEX MODE: Brace.get_text() creates a Tex (TEXT mode) object. NEVER put math "
+    "commands (\\vec, \\frac, \\cos, \\theta, \\lvert etc.) inside get_text(). "
+    "Use brace.get_tex(r'math expression') for math, or brace.get_text('plain text') "
+    "for plain labels. Similarly, Text() is Pango, not LaTeX — no LaTeX commands.\n"
     "- COORDINATE DIMENSIONS: Manim uses 3D points everywhere. ALL coordinate arrays "
     "MUST be 3D: np.array([x, y, 0]). NEVER pass 2D arrays like vec[:2] to Arrow, "
     "Line, Dot, DashedLine, etc. get_center()/c2p() return 3D vectors; any manual "
@@ -172,8 +184,13 @@ LLM_RETRY_MAX_SECONDS = _load_float_env("LLM_RETRY_MAX_SECONDS", default=12.0, m
 if LLM_RETRY_MAX_SECONDS < LLM_RETRY_BASE_SECONDS:
     LLM_RETRY_MAX_SECONDS = LLM_RETRY_BASE_SECONDS
 
-# Unified candidate list: Groq first, then Cerebras as rate-limit fallback
-MODEL_CANDIDATES: List[Tuple[str, str]] = [("groq", m) for m in [PRIMARY_GROQ_MODEL, *FALLBACK_GROQ_MODELS]]
+# Unified candidate list: Azure OpenAI first, then Groq, then Cerebras as fallback
+MODEL_CANDIDATES: List[Tuple[str, str]] = []
+if azure_openai_api_key and azure_openai_endpoint:
+    MODEL_CANDIDATES.append(("azure", azure_openai_deployment))
+else:
+    print("Info: Azure OpenAI not configured \u2013 Azure fallback disabled.")
+MODEL_CANDIDATES.extend(("groq", m) for m in [PRIMARY_GROQ_MODEL, *FALLBACK_GROQ_MODELS])
 if cerebras_api_key:
     MODEL_CANDIDATES.append(("cerebras", CEREBRAS_MODEL))
 else:
@@ -183,6 +200,14 @@ else:
 @lru_cache(maxsize=16)
 def _get_llm_client(provider: str, model_name: str):
     """Return a LangChain chat model for the given provider."""
+    if provider == "azure":
+        return AzureChatOpenAI(
+            azure_deployment=model_name,
+            azure_endpoint=azure_openai_endpoint,
+            api_key=azure_openai_api_key,
+            api_version=azure_openai_api_version,
+            max_tokens=16384,
+        )
     if provider == "cerebras":
         return ChatOpenAI(
             model=model_name,
@@ -199,7 +224,9 @@ def _get_llm_client(provider: str, model_name: str):
 
 
 # Backward compatibility for any direct imports/tests.
-llm = _get_llm_client("groq", PRIMARY_GROQ_MODEL)
+_default_provider = "azure" if (azure_openai_api_key and azure_openai_endpoint) else "groq"
+_default_model = azure_openai_deployment if _default_provider == "azure" else PRIMARY_GROQ_MODEL
+llm = _get_llm_client(_default_provider, _default_model)
 
 
 def _is_retryable_llm_error(exc: Exception) -> bool:
@@ -831,6 +858,54 @@ def _detect_bare_opacity_kwarg(tree: ast.AST) -> List[str]:
     return errors
 
 
+_MATH_LATEX_PATTERN = re.compile(
+    r"\\(?:frac|vec|cos|sin|tan|theta|alpha|beta|gamma|pi|lvert|rvert|lVert|rVert"
+    r"|sqrt|sum|prod|int|infty|cdot|times|div|leq|geq|neq|approx|equiv"
+    r"|left|right|begin|end|hat|bar|dot|tilde|mathbb|mathcal|mathrm|operatorname)"
+)
+
+
+def _detect_math_in_text_mode(tree: ast.AST) -> List[str]:
+    """Detect math LaTeX commands inside Brace.get_text() or Text() calls.
+
+    ``Brace.get_text()`` creates a ``Tex`` object in TEXT mode.  Passing math
+    commands (\\vec, \\frac, \\cos, etc.) without ``$...$`` wrapping causes
+    a LaTeX DVI compilation error.  The fix is to use ``brace.get_tex()`` for
+    math expressions, or wrap in ``$...$``.
+    """
+    errors: List[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+
+        func_name = _get_call_name(node.func)
+        is_get_text = (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get_text"
+        )
+        is_text_constructor = func_name == "Text"
+
+        if not is_get_text and not is_text_constructor:
+            continue
+
+        for arg in node.args:
+            literal = _extract_string_literal(arg)
+            if literal and _MATH_LATEX_PATTERN.search(literal):
+                if is_get_text:
+                    errors.append(
+                        f"Line {node.lineno}: get_text() is TEXT mode; math commands will cause "
+                        "a DVI error. Use get_tex() for math expressions, or plain text for labels"
+                    )
+                else:
+                    errors.append(
+                        f"Line {node.lineno}: Text() is Pango, not LaTeX; LaTeX commands will "
+                        "render as raw text. Use MathTex() or Tex() for LaTeX expressions"
+                    )
+                break
+
+    return errors
+
+
 # Manim constructors that accept point/coordinate arguments
 _POINT_ACCEPTING_CONSTRUCTORS = {
     "Arrow", "Line", "DashedLine", "DoubleArrow", "Vector",
@@ -961,6 +1036,7 @@ def validate_code(code: str, length: str) -> List[str]:
     errors.extend(_detect_external_asset_dependencies(tree))
     errors.extend(_detect_mixed_point_dimension_expressions(tree))
     errors.extend(_detect_bare_opacity_kwarg(tree))
+    errors.extend(_detect_math_in_text_mode(tree))
     errors.extend(_detect_2d_slices_in_constructors(tree))
     errors.extend(_detect_angle_misuse(tree))
 
