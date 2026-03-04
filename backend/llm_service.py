@@ -17,6 +17,16 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
 import openai as openai_mod
+from .pacing import (
+    build_scene_timeline,
+    estimate_code_duration_seconds,
+    pacing_error,
+    rescale_code_timing,
+)
+from .reward_model import RewardFeatures, score_generation_candidate
+from .scene_memory import format_memory_context, retrieve_scene_memories
+from .style_service import resolve_style_pack
+from .voiceover_service import build_voiceover_script, script_to_voiceover_metadata
 
 # Load .env from project root
 env_path = Path(__file__).resolve().parent.parent / ".env"
@@ -48,7 +58,9 @@ PROMPT_FILES = {
     "repair_system": "repair_system.md",
     "runtime_repair_system": "runtime_repair_system.md",
     "visual_repair_system": "visual_repair_system.md",
+    "scene_editor_system": "scene_editor_system.md",
     "length_profiles": "length_profiles.json",
+    "style_packs": "style_packs.json",
 }
 
 SCENE_PLAN_REQUIRED_KEYS = {"title", "hook", "narrative_arc", "scenes"}
@@ -64,7 +76,7 @@ SCENE_REQUIRED_KEYS = {
     "clear_policy",
     "focus_targets",
 }
-ALLOWED_SCENE_BASES = {"Scene", "ThreeDScene", "MovingCameraScene"}
+ALLOWED_SCENE_BASES = {"Scene", "ThreeDScene", "MovingCameraScene", "VoiceoverScene"}
 FORBIDDEN_MATH_UNICODE = {
     "\u00d7": "\\times",
     "\u00f7": "\\div",
@@ -212,6 +224,18 @@ MANIM_VISUAL_QA_MAX_REPAIRS = _load_int_env(
     default=_default_visual_repairs,
     minimum=0,
 )
+MANIM_TIMELINE_PACING_ENABLED = _load_bool_env("MANIM_TIMELINE_PACING_ENABLED", default=True)
+MANIM_PACING_TOLERANCE_SECONDS = _load_int_env(
+    "MANIM_PACING_TOLERANCE_SECONDS",
+    default=12,
+    minimum=0,
+)
+MANIM_AUTO_TIMESCALE_ENABLED = _load_bool_env("MANIM_AUTO_TIMESCALE_ENABLED", default=True)
+MANIM_MULTI_CANDIDATE_ENABLED = _load_bool_env("MANIM_MULTI_CANDIDATE_ENABLED", default=True)
+MANIM_MULTI_CANDIDATE_COUNT = _load_int_env("MANIM_MULTI_CANDIDATE_COUNT", default=3, minimum=1)
+MANIM_MULTI_CANDIDATE_VISUAL_QA = _load_bool_env("MANIM_MULTI_CANDIDATE_VISUAL_QA", default=True)
+MANIM_SCENE_MEMORY_ENABLED = _load_bool_env("MANIM_SCENE_MEMORY_ENABLED", default=True)
+MANIM_SCENE_MEMORY_TOP_K = _load_int_env("MANIM_SCENE_MEMORY_TOP_K", default=3, minimum=0)
 
 # Unified candidate list: Azure OpenAI first, then Groq, then Cerebras as fallback
 MODEL_CANDIDATES: List[Tuple[str, str]] = []
@@ -612,8 +636,29 @@ def _format_scene_plan_schema_hint() -> str:
     )
 
 
-async def compose_scene_plan(prompt: str, length: str) -> Dict[str, Any]:
+def _enrich_scene_plan_with_timeline(scene_plan: Dict[str, Any], length: str) -> Dict[str, Any]:
+    enriched = dict(scene_plan)
+    timeline = build_scene_timeline(scene_plan)
     profile = get_length_profile(length)
+    enriched["timeline"] = timeline
+    enriched["duration_budget"] = {
+        "target_seconds_min": int(profile.get("target_seconds_min", 0)),
+        "target_seconds_max": int(profile.get("target_seconds_max", 0)),
+    }
+    return enriched
+
+
+async def compose_scene_plan(
+    prompt: str,
+    length: str,
+    style_pack: Dict[str, Any] | None = None,
+    memory_context: str = "",
+    voiceover_mode: str = "none",
+    candidate_index: int = 1,
+    candidate_total: int = 1,
+) -> Dict[str, Any]:
+    profile = get_length_profile(length)
+    style_payload = style_pack or {"style_id": "classic_clean", "tokens": {}}
     prompt_template = ChatPromptTemplate.from_messages(
         [
             SystemMessage(content=PROMPT_ASSETS["composer_system"]),
@@ -622,6 +667,10 @@ async def compose_scene_plan(prompt: str, length: str) -> Dict[str, Any]:
                 "User prompt:\n{prompt}\n\n"
                 "Length selection: {length_name}\n"
                 "Length profile JSON:\n{length_profile_json}\n\n"
+                "Style pack JSON:\n{style_pack_json}\n\n"
+                "Historical high-quality scene memory:\n{memory_context}\n\n"
+                "Voiceover mode: {voiceover_mode}\n\n"
+                "Candidate index: {candidate_index}/{candidate_total}\n"
                 "Produce a scene plan with strong educational flow and concrete visual steps.\n"
                 "Return JSON only using this schema:\n{schema_hint}",
             ),
@@ -634,17 +683,35 @@ async def compose_scene_plan(prompt: str, length: str) -> Dict[str, Any]:
             "prompt": prompt,
             "length_name": profile["length_name"],
             "length_profile_json": json.dumps(profile, indent=2),
+            "style_pack_json": json.dumps(style_payload, indent=2),
+            "memory_context": memory_context or "No relevant historical scenes.",
+            "voiceover_mode": voiceover_mode,
+            "candidate_index": int(candidate_index),
+            "candidate_total": int(candidate_total),
             "schema_hint": _format_scene_plan_schema_hint(),
         },
         operation="compose_scene_plan",
     )
 
     parsed = json.loads(_extract_json_object(raw_response))
-    return _normalize_scene_plan(parsed)
+    normalized = _normalize_scene_plan(parsed)
+    return _enrich_scene_plan_with_timeline(normalized, length)
 
 
-async def generate_code_from_plan(prompt: str, length: str, scene_plan: Dict[str, Any]) -> str:
+async def generate_code_from_plan(
+    prompt: str,
+    length: str,
+    scene_plan: Dict[str, Any],
+    style_pack: Dict[str, Any] | None = None,
+    memory_context: str = "",
+    voiceover_script: Dict[str, Any] | None = None,
+    candidate_index: int = 1,
+    candidate_total: int = 1,
+) -> str:
     profile = get_length_profile(length)
+    style_payload = style_pack or {"style_id": "classic_clean", "tokens": {}}
+    voiceover_payload = voiceover_script or {"enabled": False, "chunks": []}
+    voiceover_enabled = bool(voiceover_payload.get("enabled", False))
     prompt_template = ChatPromptTemplate.from_messages(
         [
             SystemMessage(content=PROMPT_ASSETS["codegen_system"]),
@@ -654,6 +721,16 @@ async def generate_code_from_plan(prompt: str, length: str, scene_plan: Dict[str
                 "Length selection: {length_name}\n"
                 "Length profile JSON:\n{length_profile_json}\n\n"
                 "Scene plan JSON:\n{scene_plan_json}\n\n"
+                "Style pack JSON:\n{style_pack_json}\n\n"
+                "Historical scene memory:\n{memory_context}\n\n"
+                "Voiceover script JSON:\n{voiceover_script_json}\n\n"
+                "Voiceover enabled: {voiceover_enabled}\n"
+                "Candidate index: {candidate_index}/{candidate_total}\n"
+                "If voiceover_enabled=true:\n"
+                "- import `VoiceoverScene` from `manim_voiceover`\n"
+                "- use `class GenScene(VoiceoverScene)` or combined camera+voiceover scene base\n"
+                "- use `with self.voiceover(text=...) as tracker:` blocks and align animation timing to tracker.duration\n"
+                "- keep generated subtitles aligned with voiceover chunks\n"
                 "Generate executable Python code for ManimCE.\n"
                 "Return code only.",
             ),
@@ -667,6 +744,12 @@ async def generate_code_from_plan(prompt: str, length: str, scene_plan: Dict[str
             "length_name": profile["length_name"],
             "length_profile_json": json.dumps(profile, indent=2),
             "scene_plan_json": json.dumps(scene_plan, indent=2),
+            "style_pack_json": json.dumps(style_payload, indent=2),
+            "memory_context": memory_context or "No relevant historical scenes.",
+            "voiceover_script_json": json.dumps(voiceover_payload, indent=2),
+            "voiceover_enabled": voiceover_enabled,
+            "candidate_index": int(candidate_index),
+            "candidate_total": int(candidate_total),
         },
         operation="generate_code_from_plan",
     )
@@ -751,6 +834,27 @@ def _has_valid_genscene_class(tree: ast.AST) -> bool:
             if base_name in ALLOWED_SCENE_BASES:
                 return True
 
+    return False
+
+
+def _genscene_base_names(tree: ast.AST) -> Set[str]:
+    names: Set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef) or node.name != "GenScene":
+            continue
+        for base in node.bases:
+            base_name = _get_call_name(base)
+            if base_name:
+                names.add(base_name)
+    return names
+
+
+def _has_voiceover_import(tree: ast.AST) -> bool:
+    for node in getattr(tree, "body", []):
+        if isinstance(node, ast.ImportFrom) and node.module == "manim_voiceover":
+            for alias in node.names:
+                if alias.name in {"VoiceoverScene", "*"}:
+                    return True
     return False
 
 
@@ -1194,7 +1298,7 @@ def _count_wait_calls(tree: ast.AST) -> int:
     return count
 
 
-def validate_code(code: str, length: str) -> List[str]:
+def validate_code(code: str, length: str, scene_plan: Dict[str, Any] | None = None) -> List[str]:
     errors: List[str] = []
     normalized = (code or "").strip()
 
@@ -1216,7 +1320,11 @@ def validate_code(code: str, length: str) -> List[str]:
         errors.append("Missing required import: from manim import *")
 
     if not _has_valid_genscene_class(tree):
-        errors.append("Missing class GenScene inheriting Scene/ThreeDScene/MovingCameraScene")
+        errors.append("Missing class GenScene inheriting Scene/ThreeDScene/MovingCameraScene/VoiceoverScene")
+    else:
+        base_names = _genscene_base_names(tree)
+        if "VoiceoverScene" in base_names and not _has_voiceover_import(tree):
+            errors.append("GenScene uses VoiceoverScene but is missing `from manim_voiceover import VoiceoverScene`")
 
     errors.extend(_detect_play_antipatterns(tree))
     errors.extend(_detect_forbidden_unicode_math(tree))
@@ -1231,12 +1339,30 @@ def validate_code(code: str, length: str) -> List[str]:
     errors.extend(_detect_fstring_in_mathtex(tree))
     errors.extend(_detect_3d_without_camera_setup(tree))
 
-    min_wait_calls = int(get_length_profile(length).get("minimum_wait_calls", 0))
+    profile = get_length_profile(length)
+    min_wait_calls = int(profile.get("minimum_wait_calls", 0))
     wait_calls = _count_wait_calls(tree)
-    if wait_calls < min_wait_calls:
-        errors.append(
-            f"Insufficient pacing: found {wait_calls} wait() calls, require >= {min_wait_calls} for {length}"
+    duration_estimate = estimate_code_duration_seconds(normalized)
+
+    if MANIM_TIMELINE_PACING_ENABLED:
+        target_min = int(profile.get("target_seconds_min", 0))
+        target_max = int(profile.get("target_seconds_max", target_min))
+        pacing_issue_msg = pacing_error(
+            duration_estimate,
+            target_min=target_min,
+            target_max=target_max,
+            tolerance_seconds=MANIM_PACING_TOLERANCE_SECONDS,
         )
+        if pacing_issue_msg:
+            errors.append(
+                f"{pacing_issue_msg} for {length} "
+                f"(wait_calls={wait_calls}, play_calls={duration_estimate.play_calls})"
+            )
+    else:
+        if wait_calls < min_wait_calls:
+            errors.append(
+                f"Insufficient pacing: found {wait_calls} wait() calls, require >= {min_wait_calls} for {length}"
+            )
 
     # De-duplicate while preserving order
     deduped: List[str] = []
@@ -1331,8 +1457,14 @@ async def repair_code_from_runtime_error(
     repaired_code = _apply_all_auto_fixes(repaired_code, length)
 
     errors = validate_code(repaired_code, length)
-    if errors and all(item.startswith("Insufficient pacing:") for item in errors):
-        repaired_code = _force_pad_wait_calls(repaired_code, length)
+    pacing_only_errors = errors and all(
+        item.startswith("Insufficient pacing") or item.startswith("Excessive pacing")
+        for item in errors
+    )
+    if pacing_only_errors:
+        repaired_code = _auto_scale_timing(repaired_code, length)
+        if not MANIM_TIMELINE_PACING_ENABLED:
+            repaired_code = _force_pad_wait_calls(repaired_code, length)
         errors = validate_code(repaired_code, length)
 
     if errors:
@@ -1342,11 +1474,11 @@ async def repair_code_from_runtime_error(
     return repaired_code
 
 
-def run_visual_quality_check_for_code(code: str, mode: str) -> Dict[str, Any]:
+def run_visual_quality_check_for_code(code: str, mode: str, topic_hint: str = "") -> Dict[str, Any]:
     """Run visual QA in a low-quality preflight render and return a structured report."""
     from .manim_service import run_visual_quality_check
 
-    return run_visual_quality_check(code=code, mode=mode)
+    return run_visual_quality_check(code=code, mode=mode, topic_hint=topic_hint)
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -1401,6 +1533,103 @@ def _normalize_quality_report(report: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
+def _infer_problem_scene_names(
+    scene_plan: Dict[str, Any],
+    quality_report: Dict[str, Any],
+    max_scenes: int = 3,
+) -> List[str]:
+    scenes = scene_plan.get("scenes") if isinstance(scene_plan, dict) else []
+    if not isinstance(scenes, list) or not scenes:
+        return []
+
+    windows: List[Tuple[str, int, int]] = []
+    cursor = 0
+    for idx, scene in enumerate(scenes, start=1):
+        if not isinstance(scene, dict):
+            continue
+        name = str(scene.get("name", f"Scene {idx}")).strip() or f"Scene {idx}"
+        try:
+            duration = max(1, int(scene.get("duration_seconds", 1)))
+        except (TypeError, ValueError):
+            duration = 1
+        windows.append((name, cursor, cursor + duration))
+        cursor += duration
+
+    if not windows:
+        return []
+
+    issues = quality_report.get("issues") if isinstance(quality_report, dict) else []
+    if not isinstance(issues, list) or not issues:
+        return []
+
+    known_scene_names = {name for name, _, _ in windows}
+    max_frame_index = -1
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        try:
+            frame_index = int(issue.get("frame_index", -1))
+        except (TypeError, ValueError):
+            frame_index = -1
+        if frame_index > max_frame_index:
+            max_frame_index = frame_index
+
+    try:
+        frames_analyzed = int(quality_report.get("frames_analyzed", 0))
+    except (TypeError, ValueError):
+        frames_analyzed = 0
+    if frames_analyzed <= 0:
+        frames_analyzed = max(1, max_frame_index + 1)
+
+    total_seconds = max(1, windows[-1][2])
+    selected: List[str] = []
+    seen: Set[str] = set()
+
+    def _add_scene(name: str) -> None:
+        if name in seen or name not in known_scene_names:
+            return
+        selected.append(name)
+        seen.add(name)
+
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+
+        details = issue.get("details")
+        if isinstance(details, dict):
+            explicit_scene = str(details.get("scene_name", "")).strip()
+            if explicit_scene:
+                _add_scene(explicit_scene)
+                if len(selected) >= max_scenes:
+                    break
+
+        try:
+            frame_index = int(issue.get("frame_index", -1))
+        except (TypeError, ValueError):
+            frame_index = -1
+        if frame_index < 0:
+            continue
+
+        if frames_analyzed <= 1:
+            second = 0.0
+        else:
+            ratio = max(0.0, min(1.0, frame_index / float(frames_analyzed - 1)))
+            second = ratio * float(total_seconds)
+
+        mapped_name = ""
+        for scene_name, start_second, end_second in windows:
+            if start_second <= second < end_second:
+                mapped_name = scene_name
+                break
+        if not mapped_name:
+            mapped_name = windows[-1][0]
+        _add_scene(mapped_name)
+        if len(selected) >= max_scenes:
+            break
+
+    return selected
+
+
 async def repair_code_from_visual_issues(
     prompt: str,
     length: str,
@@ -1409,6 +1638,7 @@ async def repair_code_from_visual_issues(
     quality_report: Dict[str, Any],
 ) -> str:
     profile = get_length_profile(length)
+    targeted_scene_names = _infer_problem_scene_names(scene_plan, quality_report)
     prompt_template = ChatPromptTemplate.from_messages(
         [
             SystemMessage(content=PROMPT_ASSETS["visual_repair_system"]),
@@ -1419,8 +1649,10 @@ async def repair_code_from_visual_issues(
                 "Length profile JSON:\n{length_profile_json}\n\n"
                 "Scene plan JSON:\n{scene_plan_json}\n\n"
                 "Visual QA report JSON:\n{quality_report_json}\n\n"
+                "Targeted scene names inferred from QA issues:\n{targeted_scene_names_json}\n\n"
                 "Current code:\n{bad_code}\n\n"
                 "Fix all visual quality issues while preserving narrative flow.\n"
+                "Prefer patching only targeted scenes; keep unaffected scenes unchanged except for shared helpers/imports.\n"
                 "Return corrected executable code only.",
             ),
         ]
@@ -1434,18 +1666,58 @@ async def repair_code_from_visual_issues(
             "length_profile_json": json.dumps(profile, indent=2),
             "scene_plan_json": json.dumps(scene_plan, indent=2),
             "quality_report_json": json.dumps(_normalize_quality_report(quality_report), indent=2),
+            "targeted_scene_names_json": json.dumps(targeted_scene_names, indent=2),
             "bad_code": bad_code,
         },
         operation="repair_code_from_visual_issues",
     )
 
     repaired_code = sanitize_generated_code(raw_response)
-    repaired_code = _apply_all_auto_fixes(repaired_code, length)
-    errors = validate_code(repaired_code, length)
+    repaired_code = _apply_all_auto_fixes(repaired_code, length, scene_plan=scene_plan)
+    errors = validate_code(repaired_code, length, scene_plan=scene_plan)
     if errors:
         raise ValueError(
             "Visual repair produced invalid code: " + _summarize_errors(errors)
         )
+    return repaired_code
+
+
+async def apply_scene_editor_layout_edits(
+    length: str,
+    bad_code: str,
+    edits: List[Dict[str, Any]],
+) -> str:
+    profile = get_length_profile(length)
+    prompt_template = ChatPromptTemplate.from_messages(
+        [
+            SystemMessage(content=PROMPT_ASSETS["scene_editor_system"]),
+            (
+                "human",
+                "Length selection: {length_name}\n"
+                "Length profile JSON:\n{length_profile_json}\n\n"
+                "Layout edits JSON:\n{edits_json}\n\n"
+                "Current code:\n{bad_code}\n\n"
+                "Return corrected executable code only.",
+            ),
+        ]
+    )
+
+    raw_response = await _invoke_with_resilience(
+        prompt_template,
+        {
+            "length_name": profile["length_name"],
+            "length_profile_json": json.dumps(profile, indent=2),
+            "edits_json": json.dumps(edits, indent=2),
+            "bad_code": bad_code,
+        },
+        operation="apply_scene_editor_layout_edits",
+    )
+
+    repaired_code = sanitize_generated_code(raw_response)
+    repaired_code = _apply_all_auto_fixes(repaired_code, length)
+    errors = validate_code(repaired_code, length)
+    if errors:
+        raise ValueError("Scene editor repair produced invalid code: " + _summarize_errors(errors))
     return repaired_code
 
 
@@ -1468,6 +1740,9 @@ def _auto_pad_wait_calls(code: str, length: str) -> str:
     minimum threshold is satisfied.
     """
     import re as _re
+
+    if MANIM_TIMELINE_PACING_ENABLED:
+        return code
 
     min_wait = int(get_length_profile(length).get("minimum_wait_calls", 0))
     if min_wait <= 0:
@@ -1524,6 +1799,9 @@ def _force_pad_wait_calls(code: str, length: str) -> str:
     `self.play(...)` lines. It appends waits at the tail of construct() when
     runtime-repaired code still fails pacing validation.
     """
+    if MANIM_TIMELINE_PACING_ENABLED:
+        return code
+
     min_wait = int(get_length_profile(length).get("minimum_wait_calls", 0))
     if min_wait <= 0:
         return code
@@ -1659,7 +1937,23 @@ def _auto_fix_2d_numpy_arrays(code: str) -> str:
     )
 
 
-def _apply_all_auto_fixes(code: str, length: str) -> str:
+def _auto_scale_timing(code: str, length: str) -> str:
+    if not MANIM_AUTO_TIMESCALE_ENABLED:
+        return code
+    profile = get_length_profile(length)
+    target_min = int(profile.get("target_seconds_min", 0))
+    target_max = int(profile.get("target_seconds_max", target_min))
+    if target_min <= 0 or target_max <= 0:
+        return code
+    scaled, _ = rescale_code_timing(
+        code,
+        target_min=target_min,
+        target_max=target_max,
+    )
+    return scaled
+
+
+def _apply_all_auto_fixes(code: str, length: str, scene_plan: Dict[str, Any] | None = None) -> str:
     """Apply every mechanical auto-fix in sequence, then pad wait calls if needed.
 
     This is the single entry-point called from both the primary generation
@@ -1669,24 +1963,212 @@ def _apply_all_auto_fixes(code: str, length: str) -> str:
     code = _auto_fix_showcreation(code)
     code = _auto_fix_group_to_vgroup(code)
     code = _auto_fix_2d_numpy_arrays(code)
+    code = _auto_scale_timing(code, length)
     code = _auto_pad_wait_calls(code, length)
     return code
+
+
+def _estimate_render_cost(code: str) -> float:
+    lines = [line for line in code.splitlines() if line.strip()]
+    line_factor = min(1.0, len(lines) / 420.0)
+    estimate = estimate_code_duration_seconds(code)
+    animation_factor = min(1.0, estimate.play_calls / 140.0)
+    return max(0.0, min(1.0, 0.55 * line_factor + 0.45 * animation_factor))
+
+
+def _score_candidate_bundle(
+    code: str,
+    errors: List[str],
+    length: str,
+    visual_score: float,
+    memory_similarity: float,
+) -> float:
+    profile = get_length_profile(length)
+    estimate = estimate_code_duration_seconds(code)
+    features = RewardFeatures(
+        static_error_count=len(errors),
+        visual_score=visual_score,
+        pacing_seconds=estimate.total_seconds,
+        target_seconds_min=float(profile.get("target_seconds_min", 0)),
+        target_seconds_max=float(profile.get("target_seconds_max", 0)),
+        render_cost_estimate=_estimate_render_cost(code),
+        memory_similarity=memory_similarity,
+    )
+    return score_generation_candidate(features)
+
+
+async def _generate_and_score_candidate(
+    prompt: str,
+    length: str,
+    scene_plan: Dict[str, Any],
+    style_pack: Dict[str, Any],
+    memory_context: str,
+    voiceover_script: Dict[str, Any],
+    candidate_index: int,
+    candidate_total: int,
+    memory_similarity: float,
+) -> Dict[str, Any]:
+    try:
+        code = await generate_code_from_plan(
+            prompt=prompt,
+            length=length,
+            scene_plan=scene_plan,
+            style_pack=style_pack,
+            memory_context=memory_context,
+            voiceover_script=voiceover_script,
+            candidate_index=candidate_index,
+            candidate_total=candidate_total,
+        )
+    except Exception as exc:
+        return {
+            "candidate_index": candidate_index,
+            "code": "",
+            "errors": [f"Candidate generation failed: {exc}"],
+            "score": 0.0,
+            "visual_score": 0.0,
+            "scene_plan": scene_plan,
+            "voiceover_script": voiceover_script,
+        }
+    code = _apply_all_auto_fixes(code, length, scene_plan=scene_plan)
+    errors = validate_code(code, length, scene_plan=scene_plan)
+
+    visual_score = 70.0
+    if MANIM_MULTI_CANDIDATE_VISUAL_QA and not errors:
+        try:
+            report = run_visual_quality_check_for_code(
+                code=code,
+                mode=MANIM_VISUAL_QA_MODE,
+                topic_hint=prompt,
+            )
+            visual_score = float(report.get("score", 70))
+        except Exception:
+            visual_score = 40.0
+
+    score = _score_candidate_bundle(
+        code=code,
+        errors=errors,
+        length=length,
+        visual_score=visual_score,
+        memory_similarity=memory_similarity,
+    )
+    return {
+        "candidate_index": candidate_index,
+        "code": code,
+        "errors": errors,
+        "score": score,
+        "visual_score": visual_score,
+        "scene_plan": scene_plan,
+        "voiceover_script": voiceover_script,
+    }
 
 
 async def generate_manim_code(
     prompt: str,
     length: str,
     progress_callback: ProgressCallback = None,
-) -> str:
+) -> str | Dict[str, Any]:
     """Generate Manim code using compose -> codegen -> validate -> repair pipeline."""
-    _emit_progress(progress_callback, "composing", "Composing internal scene plan...")
-    scene_plan = await compose_scene_plan(prompt, length)
+    return await generate_manim_code_with_options(
+        prompt=prompt,
+        length=length,
+        progress_callback=progress_callback,
+    )
 
-    _emit_progress(progress_callback, "generating", "Generating Manim code from scene plan...")
-    code = await generate_code_from_plan(prompt, length, scene_plan)
 
-    _emit_progress(progress_callback, "validating", "Validating generated code...")
-    errors = validate_code(code, length)
+async def generate_manim_code_with_options(
+    prompt: str,
+    length: str,
+    progress_callback: ProgressCallback = None,
+    style_pack_name: str | None = None,
+    voiceover_mode: str = "none",
+    voiceover_text: str = "",
+    return_metadata: bool = False,
+) -> str | Dict[str, Any]:
+    _emit_progress(progress_callback, "selecting_style", "Selecting visual style pack...")
+    resolved_style = resolve_style_pack(style_pack_name)
+
+    memories: List[Dict[str, Any]] = []
+    memory_context = "No relevant historical scenes."
+    if MANIM_SCENE_MEMORY_ENABLED and MANIM_SCENE_MEMORY_TOP_K > 0:
+        _emit_progress(progress_callback, "retrieving_memory", "Retrieving high-quality scene memories...")
+        try:
+            memories = await retrieve_scene_memories(prompt, top_k=MANIM_SCENE_MEMORY_TOP_K)
+        except Exception:
+            memories = []
+        memory_context = format_memory_context(memories)
+    memory_similarity = max((float(item.get("similarity", 0.0)) for item in memories), default=0.0)
+
+    candidate_total = MANIM_MULTI_CANDIDATE_COUNT if MANIM_MULTI_CANDIDATE_ENABLED else 1
+    candidate_total = max(1, candidate_total)
+    _emit_progress(progress_callback, "composing", "Composing internal scene plan candidates...")
+    _emit_progress(progress_callback, "generating", "Generating Manim code candidates from scene plans...")
+    _emit_progress(
+        progress_callback,
+        "candidate_generating",
+        f"Generating {candidate_total} plan+code candidate(s)...",
+    )
+
+    candidate_results: List[Dict[str, Any]] = []
+    for idx in range(candidate_total):
+        try:
+            candidate_scene_plan = await compose_scene_plan(
+                prompt=prompt,
+                length=length,
+                style_pack=resolved_style,
+                memory_context=memory_context,
+                voiceover_mode=voiceover_mode,
+                candidate_index=idx + 1,
+                candidate_total=candidate_total,
+            )
+        except Exception as exc:
+            candidate_results.append(
+                {
+                    "candidate_index": idx + 1,
+                    "code": "",
+                    "errors": [f"Scene plan composition failed: {exc}"],
+                    "score": 0.0,
+                    "visual_score": 0.0,
+                    "scene_plan": {},
+                    "voiceover_script": {"enabled": False, "chunks": []},
+                }
+            )
+            continue
+
+        candidate_scene_plan["style_pack"] = resolved_style.get("style_id", "classic_clean")
+        candidate_voiceover_script = {"enabled": False, "chunks": []}
+        if voiceover_mode.strip().lower() in {"scripted", "auto", "aligned"}:
+            candidate_voiceover_script = build_voiceover_script(
+                prompt=prompt,
+                scene_plan=candidate_scene_plan,
+                provided_voiceover_text=voiceover_text,
+            )
+
+        candidate = await _generate_and_score_candidate(
+            prompt=prompt,
+            length=length,
+            scene_plan=candidate_scene_plan,
+            style_pack=resolved_style,
+            memory_context=memory_context,
+            voiceover_script=candidate_voiceover_script,
+            candidate_index=idx + 1,
+            candidate_total=candidate_total,
+            memory_similarity=memory_similarity,
+        )
+        candidate_results.append(candidate)
+
+    _emit_progress(progress_callback, "candidate_scoring", "Scoring candidates with reward model...")
+    candidate_results.sort(key=lambda item: float(item.get("score", 0.0)), reverse=True)
+    best_candidate = candidate_results[0]
+    scene_plan = best_candidate.get("scene_plan", {})
+    if not isinstance(scene_plan, dict):
+        scene_plan = {}
+    voiceover_script = best_candidate.get("voiceover_script", {"enabled": False, "chunks": []})
+    if not isinstance(voiceover_script, dict):
+        voiceover_script = {"enabled": False, "chunks": []}
+    code = str(best_candidate["code"])
+    errors = list(best_candidate.get("errors", []))
+
+    _emit_progress(progress_callback, "validating", "Validating selected candidate...")
 
     max_retries = 2
     retry = 0
@@ -1699,18 +2181,19 @@ async def generate_manim_code(
         )
         code = await repair_code(prompt, length, scene_plan, code, errors)
         _emit_progress(progress_callback, "validating", "Re-validating repaired code...")
-        errors = validate_code(code, length)
+        errors = validate_code(code, length, scene_plan=scene_plan)
 
     if errors:
         # Last-resort: apply all mechanical auto-fixes
-        code = _apply_all_auto_fixes(code, length)
-        errors = validate_code(code, length)
+        code = _apply_all_auto_fixes(code, length, scene_plan=scene_plan)
+        errors = validate_code(code, length, scene_plan=scene_plan)
 
     if errors:
         raise ValueError(
             "Code validation failed after 2 repair attempts: " + _summarize_errors(errors)
         )
 
+    last_quality_report: Dict[str, Any] | None = None
     if MANIM_VISUAL_QA_ENABLED:
         quality_attempt = 0
         while True:
@@ -1723,6 +2206,7 @@ async def generate_manim_code(
                 quality_report = run_visual_quality_check_for_code(
                     code=code,
                     mode=MANIM_VISUAL_QA_MODE,
+                    topic_hint=prompt,
                 )
             except Exception as exc:
                 quality_report = {
@@ -1743,6 +2227,7 @@ async def generate_manim_code(
                 }
 
             quality_report = _normalize_quality_report(quality_report)
+            last_quality_report = quality_report
             if quality_report["passed"]:
                 break
 
@@ -1776,5 +2261,25 @@ async def generate_manim_code(
                 quality_report=quality_report,
             )
 
+    voiceover_metadata = script_to_voiceover_metadata(voiceover_script)
+    metadata: Dict[str, Any] = {
+        "code": code,
+        "scene_plan": scene_plan,
+        "style_pack": resolved_style.get("style_id", "classic_clean"),
+        "voiceover_script": voiceover_metadata,
+        "memory_hits": memories,
+        "candidate_scores": [
+            {
+                "candidate_index": item.get("candidate_index"),
+                "score": item.get("score"),
+                "visual_score": item.get("visual_score"),
+                "error_count": len(item.get("errors", [])),
+            }
+            for item in candidate_results
+        ],
+        "quality_report": last_quality_report,
+    }
+    if return_metadata:
+        return metadata
     return code
 

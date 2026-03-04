@@ -10,7 +10,7 @@ import json
 import asyncio
 import os
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, Optional
 from redis import Redis
 
 from .redis_utils import get_redis_connection, get_progress_key, get_result_key
@@ -63,7 +63,8 @@ def process_video_generation(
     length: str,
     clerk_id: str,
     job_id: str,
-    resolution: str = "720p"
+    resolution: str = "720p",
+    options: Optional[Dict[str, Any]] = None,
 ) -> dict:
     """
     Main video generation task - runs in RQ worker.
@@ -92,7 +93,16 @@ def process_video_generation(
         # Step 2-4: Compose, generate, validate (+repair if needed)
         report_progress(redis_conn, job_id, 2, "composing", "Composing internal scene plan...")
         
-        from .llm_service import generate_manim_code, repair_code_from_runtime_error
+        opts = options or {}
+        style_pack = str(opts.get("style_pack", "")).strip() or None
+        voiceover_mode = str(opts.get("voiceover_mode", "none"))
+        voiceover_text = str(opts.get("voiceover_text", ""))
+        export_mode = str(opts.get("export_mode", "video")).strip().lower()
+
+        from .llm_service import (
+            generate_manim_code_with_options,
+            repair_code_from_runtime_error,
+        )
 
         def llm_progress(status: str, message: str) -> None:
             step_map = {
@@ -103,13 +113,30 @@ def process_video_generation(
                 "repairing_runtime": 4,
                 "quality_checking": 4,
                 "quality_repairing": 4,
+                "selecting_style": 2,
+                "retrieving_memory": 2,
+                "candidate_generating": 3,
+                "candidate_scoring": 4,
             }
             step = step_map.get(status, 4)
             report_progress(redis_conn, job_id, step, status, message)
 
-        code = _run_async(
-            generate_manim_code(prompt, length, progress_callback=llm_progress)
+        generation_bundle = _run_async(
+            generate_manim_code_with_options(
+                prompt=prompt,
+                length=length,
+                progress_callback=llm_progress,
+                style_pack_name=style_pack,
+                voiceover_mode=voiceover_mode,
+                voiceover_text=voiceover_text,
+                return_metadata=True,
+            )
         )
+        code = str(generation_bundle.get("code", ""))
+        scene_plan = generation_bundle.get("scene_plan", {})
+        quality_report = generation_bundle.get("quality_report", {}) or {}
+        resolved_style_pack = str(generation_bundle.get("style_pack", style_pack or "classic_clean"))
+        voiceover_script = generation_bundle.get("voiceover_script", {})
         
         from .manim_service import execute_manim_code
         max_render_repairs_raw = os.environ.get("MANIM_RENDER_REPAIR_ATTEMPTS", "2")
@@ -182,9 +209,44 @@ def process_video_generation(
         
         # Save to MongoDB
         chat_id = None
+        interactive_manifest = None
+        interactive_outline = None
+        if export_mode in {"interactive", "slides", "manim-slides"}:
+            try:
+                from .export_service import build_interactive_manifest, build_manim_slides_outline
+
+                interactive_manifest = build_interactive_manifest(
+                    code=code,
+                    title=scene_plan.get("title", "Interactive Export")
+                    if isinstance(scene_plan, dict)
+                    else "Interactive Export",
+                    length=length,
+                    scene_plan=scene_plan if isinstance(scene_plan, dict) else None,
+                )
+                interactive_outline = build_manim_slides_outline(interactive_manifest)
+            except Exception as export_error:
+                print(f"Warning: failed to build interactive export metadata: {export_error}")
+
+        generation_metadata = {
+            "scene_plan": scene_plan,
+            "quality_report": quality_report,
+            "style_pack": resolved_style_pack,
+            "voiceover_script": voiceover_script,
+            "export_mode": export_mode,
+            "interactive_manifest": interactive_manifest,
+            "interactive_outline": interactive_outline,
+        }
         try:
             chat_id = _run_async(
-                _save_chat_to_mongo(clerk_id, prompt, length, video_url, s3_key, code)
+                _save_chat_to_mongo(
+                    clerk_id=clerk_id,
+                    prompt=prompt,
+                    length=length,
+                    video_url=video_url,
+                    s3_key=s3_key,
+                    code=code,
+                    metadata=generation_metadata,
+                )
             )
         except Exception as db_error:
             print(f"⚠️ Failed to save chat to MongoDB: {db_error}")
@@ -192,6 +254,36 @@ def process_video_generation(
         # Increment usage with resolution-based cost
         from .user_service import increment_usage
         _run_async(increment_usage(clerk_id, resolution=resolution))
+
+        # Store successful generations for retrieval-augmented scene memory.
+        try:
+            from .scene_memory import store_scene_memory
+
+            quality_score = 0.0
+            if isinstance(quality_report, dict):
+                try:
+                    quality_score = float(quality_report.get("score", 0.0))
+                except (TypeError, ValueError):
+                    quality_score = 0.0
+
+            _run_async(
+                store_scene_memory(
+                    prompt=prompt,
+                    length=length,
+                    scene_plan=scene_plan if isinstance(scene_plan, dict) else {},
+                    code=code,
+                    quality_score=quality_score,
+                    style_pack=resolved_style_pack,
+                    lessons=[
+                        "Keep text in frame using frame-aware helpers.",
+                        "Limit concurrent labels to avoid overlap.",
+                        "Prefer arranged VGroups over manual shifts.",
+                    ],
+                    chat_id=chat_id,
+                )
+            )
+        except Exception as memory_error:
+            print(f"Warning: failed to persist scene memory: {memory_error}")
         
         # Step 6: Complete
         result = {
@@ -200,10 +292,17 @@ def process_video_generation(
             "message": "Video ready!",
             "video_url": video_url,
             "code": code,
-            "chat_id": chat_id
+            "chat_id": chat_id,
+            "style_pack": resolved_style_pack,
+            "quality_report": quality_report,
+            "interactive_manifest": interactive_manifest,
+            "interactive_outline": interactive_outline,
         }
         report_progress(redis_conn, job_id, 6, "complete", "Video ready!",
-                      video_url=video_url, code=code, chat_id=chat_id)
+                      video_url=video_url, code=code, chat_id=chat_id,
+                      style_pack=resolved_style_pack,
+                      quality_report=quality_report,
+                      interactive_manifest=interactive_manifest)
         
         # Also store the final result separately
         redis_conn.set(
@@ -241,7 +340,8 @@ async def _save_chat_to_mongo(
     length: str,
     video_url: str,
     s3_key: str,
-    code: str
+    code: str,
+    metadata: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
     """
     Save the generated chat to MongoDB.
@@ -259,6 +359,7 @@ async def _save_chat_to_mongo(
         "video_url": video_url,
         "s3_key": s3_key or "",
         "code": code,
+        "metadata": metadata or {},
         "created_at": datetime.utcnow()
     }
     result = await chats_collection.insert_one(chat_doc)

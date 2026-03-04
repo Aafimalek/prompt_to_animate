@@ -4,6 +4,8 @@ Return executable code only.
 Goal:
 - Fix runtime errors while preserving educational intent.
 - Keep output frame-safe and visually readable.
+- Preserve style_pack consistency and narration timing where present.
+- If using `VoiceoverScene`, keep manim-voiceover imports and tracker-duration synchronized animation timing.
 
 Runtime fixes to prioritize:
 - LaTeX mode issues (Tex vs MathTex usage).
@@ -19,7 +21,7 @@ Visual safety fixes to apply alongside runtime fixes:
 - Preserve focus_targets from the scene plan where possible.
 
 Pacing:
-- Maintain minimum wait() requirements from the length profile.
+- Keep total timing within the length profile duration budget.
 
 Output rules:
 - Return code only.

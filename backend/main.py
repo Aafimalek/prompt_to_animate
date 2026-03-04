@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
-from typing import Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 from bson import ObjectId
 from uuid import uuid4
@@ -22,6 +22,23 @@ from .s3_service import generate_cloudfront_signed_url
 from .database import connect_to_mongo, close_mongo_connection, get_chats_collection
 from .models import ChatResponse, ChatListResponse
 from .user_service import check_can_generate, get_user_usage, add_basic_credits, set_pro_subscription
+from .style_service import get_style_catalog
+from .export_service import build_interactive_manifest, build_manim_slides_outline
+from .scene_memory import record_quality_feedback, retrieve_scene_memories
+from .voiceover_service import script_to_voiceover_metadata
+from .reward_training import train_reward_model_from_mongo
+from .collab_service import (
+    add_chat_comment,
+    code_diff,
+    create_ab_variant,
+    create_branch,
+    get_chat_code,
+    get_variant_code,
+    list_branches,
+    list_ab_variants,
+    list_chat_comments,
+    merge_branch_into_chat,
+)
 
 
 @asynccontextmanager
@@ -54,11 +71,73 @@ class AnimationRequest(BaseModel):
     length: str = "Medium (15s)"  # Default
     resolution: str = "720p"  # 720p, 1080p, 4k
     clerk_id: Optional[str] = None  # Clerk user ID for authenticated users
+    style_pack: Optional[str] = None
+    voiceover_mode: str = "none"
+    voiceover_text: Optional[str] = None
+    export_mode: str = "video"  # video | interactive | slides
 
 
 class AnimationResponse(BaseModel):
     video_url: str
     code: str
+
+
+class PartialRenderRequest(BaseModel):
+    code: str
+    resolution: str = "720p"
+    keep_sections: int = 1
+
+
+class SceneLayoutEditRequest(BaseModel):
+    code: str
+    length: str = "Medium (15s)"
+    edits: List[Dict[str, Any]]
+    resolution: str = "720p"
+    render_preview: bool = True
+    preview_sections: int = 1
+
+
+class InteractiveExportRequest(BaseModel):
+    code: str
+    length: str = "Medium (15s)"
+    title: str = "Interactive Export"
+    scene_plan: Optional[Dict[str, Any]] = None
+
+
+class QualityFeedbackRequest(BaseModel):
+    clerk_id: str
+    chat_id: str
+    rating: int
+    note: str = ""
+
+
+class ChatCommentRequest(BaseModel):
+    message: str
+    anchor: str = ""
+
+
+class ChatVariantRequest(BaseModel):
+    label: str = "variant"
+    code: str
+    prompt_override: str = ""
+    branch_id: str = ""
+
+
+class VoiceoverScriptRequest(BaseModel):
+    script: Dict[str, Any]
+
+
+class RewardRetrainRequest(BaseModel):
+    limit: int = 500
+
+
+class BranchRequest(BaseModel):
+    name: str
+    base_variant_id: str = ""
+
+
+class MergeBranchRequest(BaseModel):
+    strategy: str = "latest_variant"
 
 
 def progress_signature(progress: dict) -> Tuple[int, str, str]:
@@ -103,7 +182,19 @@ async def generate_animation(request: AnimationRequest):
         # Enqueue the video generation task
         job = queue.enqueue(
             process_video_generation,
-            args=(request.prompt, request.length, request.clerk_id or "anonymous", job_id, request.resolution),
+            args=(
+                request.prompt,
+                request.length,
+                request.clerk_id or "anonymous",
+                job_id,
+                request.resolution,
+                {
+                    "style_pack": request.style_pack,
+                    "voiceover_mode": request.voiceover_mode,
+                    "voiceover_text": request.voiceover_text or "",
+                    "export_mode": request.export_mode,
+                },
+            ),
             job_id=job_id,
             job_timeout=600,
             result_ttl=3600,
@@ -185,7 +276,19 @@ async def generate_animation_stream(request: AnimationRequest):
             # Enqueue the video generation task
             job = queue.enqueue(
                 process_video_generation,
-                args=(request.prompt, request.length, request.clerk_id, job_id, request.resolution),
+                args=(
+                    request.prompt,
+                    request.length,
+                    request.clerk_id,
+                    job_id,
+                    request.resolution,
+                    {
+                        "style_pack": request.style_pack,
+                        "voiceover_mode": request.voiceover_mode,
+                        "voiceover_text": request.voiceover_text or "",
+                        "export_mode": request.export_mode,
+                    },
+                ),
                 job_id=job_id,
                 job_timeout=600,  # 10 minute timeout for long videos
                 result_ttl=3600,  # Keep result for 1 hour
@@ -462,6 +565,240 @@ async def payment_webhook(payload: WebhookPayload):
     
     except Exception as e:
         print(f"Error processing payment webhook: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============== Advanced Feature Endpoints ==============
+
+@app.get("/style-packs")
+async def get_style_packs():
+    """Return available visual style packs and design tokens."""
+    return get_style_catalog()
+
+
+@app.post("/scene-editor/partial-render")
+async def partial_render(request: PartialRenderRequest):
+    """
+    Render a quick partial preview by keeping only the first N code sections.
+    This powers interactive scene editing without full re-render cost.
+    """
+    try:
+        from .manim_service import execute_manim_code
+
+        _s3_key, local_filename = execute_manim_code(
+            code=request.code,
+            upload_to_s3=False,
+            resolution=request.resolution,
+            length="Medium (15s)",
+            preview_sections=request.keep_sections,
+        )
+        return {
+            "status": "ok",
+            "preview_url": f"http://localhost:8000/videos/{local_filename}",
+            "keep_sections": request.keep_sections,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/scene-editor/apply-layout")
+async def apply_layout_edits(request: SceneLayoutEditRequest):
+    """
+    Apply layout edits to existing Manim code and optionally return a quick preview render.
+    """
+    try:
+        from .llm_service import apply_scene_editor_layout_edits
+        from .manim_service import execute_manim_code
+
+        edited_code = await apply_scene_editor_layout_edits(
+            length=request.length,
+            bad_code=request.code,
+            edits=request.edits,
+        )
+
+        preview_url = ""
+        if request.render_preview:
+            keep_sections = max(1, int(request.preview_sections))
+            _s3_key, local_filename = execute_manim_code(
+                code=edited_code,
+                upload_to_s3=False,
+                resolution=request.resolution,
+                length=request.length,
+                preview_sections=keep_sections,
+            )
+            preview_url = f"http://localhost:8000/videos/{local_filename}"
+
+        return {
+            "status": "ok",
+            "code": edited_code,
+            "preview_url": preview_url,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/export/interactive")
+async def export_interactive(request: InteractiveExportRequest):
+    """Generate chapter manifest and manim-slides outline from generated code."""
+    try:
+        manifest = build_interactive_manifest(
+            code=request.code,
+            title=request.title,
+            length=request.length,
+            scene_plan=request.scene_plan,
+        )
+        outline = build_manim_slides_outline(manifest)
+        return {
+            "status": "ok",
+            "manifest": manifest,
+            "slides_outline": outline,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/voiceover/subtitles")
+async def generate_voiceover_subtitles(payload: VoiceoverScriptRequest):
+    """Generate subtitle and word-level timing metadata from a voiceover script."""
+    try:
+        return {"status": "ok", "voiceover": script_to_voiceover_metadata(payload.script)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/scene-memory/search")
+async def search_scene_memory(prompt: str, top_k: int = 3):
+    """Retrieve similar high-quality historical scene memories."""
+    try:
+        memories = await retrieve_scene_memories(prompt, top_k=max(1, min(10, top_k)))
+        return {"prompt": prompt, "results": memories}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/feedback/quality")
+async def submit_quality_feedback(payload: QualityFeedbackRequest):
+    """Submit user quality feedback to improve candidate reranking."""
+    try:
+        feedback_id = await record_quality_feedback(
+            chat_id=payload.chat_id,
+            clerk_id=payload.clerk_id,
+            rating=payload.rating,
+            note=payload.note,
+        )
+        return {"status": "ok", "feedback_id": feedback_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/feedback/quality/retrain")
+async def retrain_quality_reward_model(payload: RewardRetrainRequest):
+    """Retrain and persist reranker weights from historical feedback + QA metrics."""
+    try:
+        result = await train_reward_model_from_mongo(limit=max(50, min(5000, payload.limit)))
+        return {"status": "ok", **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/chats/{clerk_id}/{chat_id}/comments")
+async def create_comment(clerk_id: str, chat_id: str, payload: ChatCommentRequest):
+    try:
+        comment_id = await add_chat_comment(
+            chat_id=chat_id,
+            clerk_id=clerk_id,
+            message=payload.message,
+            anchor=payload.anchor,
+        )
+        return {"status": "ok", "comment_id": comment_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/chats/{clerk_id}/{chat_id}/comments")
+async def get_comments(clerk_id: str, chat_id: str):
+    try:
+        comments = await list_chat_comments(chat_id=chat_id)
+        return {"status": "ok", "comments": comments}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/chats/{clerk_id}/{chat_id}/variants")
+async def create_variant(clerk_id: str, chat_id: str, payload: ChatVariantRequest):
+    try:
+        variant_id = await create_ab_variant(
+            chat_id=chat_id,
+            clerk_id=clerk_id,
+            label=payload.label,
+            code=payload.code,
+            prompt_override=payload.prompt_override,
+            branch_id=payload.branch_id,
+        )
+        return {"status": "ok", "variant_id": variant_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/chats/{clerk_id}/{chat_id}/variants")
+async def get_variants(clerk_id: str, chat_id: str):
+    try:
+        variants = await list_ab_variants(chat_id=chat_id, clerk_id=clerk_id)
+        return {"status": "ok", "variants": variants}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/chats/{clerk_id}/{chat_id}/branches")
+async def create_chat_branch(clerk_id: str, chat_id: str, payload: BranchRequest):
+    try:
+        branch_id = await create_branch(
+            chat_id=chat_id,
+            clerk_id=clerk_id,
+            name=payload.name,
+            base_variant_id=payload.base_variant_id,
+        )
+        return {"status": "ok", "branch_id": branch_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/chats/{clerk_id}/{chat_id}/branches")
+async def get_chat_branches(clerk_id: str, chat_id: str):
+    try:
+        branches = await list_branches(chat_id=chat_id, clerk_id=clerk_id)
+        return {"status": "ok", "branches": branches}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/chats/{clerk_id}/{chat_id}/branches/{branch_id}/merge")
+async def merge_chat_branch(
+    clerk_id: str,
+    chat_id: str,
+    branch_id: str,
+    payload: MergeBranchRequest,
+):
+    try:
+        result = await merge_branch_into_chat(
+            chat_id=chat_id,
+            clerk_id=clerk_id,
+            branch_id=branch_id,
+            strategy=payload.strategy,
+        )
+        return {"status": "ok", **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/chats/{clerk_id}/{chat_id}/variants/{variant_id}/diff")
+async def get_variant_diff(clerk_id: str, chat_id: str, variant_id: str):
+    try:
+        base_code = await get_chat_code(chat_id=chat_id, clerk_id=clerk_id)
+        variant_code = await get_variant_code(chat_id=chat_id, variant_id=variant_id, clerk_id=clerk_id)
+        diff_text = code_diff(base_code, variant_code)
+        return {"status": "ok", "diff": diff_text}
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 

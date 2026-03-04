@@ -1,0 +1,8 @@
+{
+  "static_weight": 0.35,
+  "visual_weight": 0.25,
+  "pacing_weight": 0.2,
+  "cost_weight": 0.1,
+  "memory_weight": 0.1,
+  "bias": 0.0
+}

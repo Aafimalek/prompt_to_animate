@@ -5,6 +5,8 @@ Hard requirements:
 - Return ONLY executable Python code.
 - Keep `from manim import *` and class `GenScene`.
 - Fix every provided validation error.
+- Preserve style_pack and voiceover timing intent from scene plan metadata.
+- When VoiceoverScene is used, ensure `from manim_voiceover import VoiceoverScene` exists and voiceover blocks remain synchronized.
 
 Repair priority:
 1. Syntax and import/class correctness.
@@ -27,8 +29,8 @@ Common fixes:
 - Deprecated APIs -> modern equivalents
 
 Pacing fixes:
-- Add waits between sections to satisfy length profile minimum waits.
-- Do not cluster waits only at the end.
+- Keep total timing inside the length profile duration budget.
+- Prefer balanced run_time/wait distribution across sections.
 
 Output rules:
 - Return code only.

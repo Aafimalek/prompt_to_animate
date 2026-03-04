@@ -5,6 +5,8 @@ Goal:
 - Fix all visual-quality issues from the report.
 - Preserve the scene narrative, pacing, and educational intent.
 - Keep code executable and ManimCE-compatible.
+- Preserve style tokens and voiceover alignment from scene metadata.
+- For VoiceoverScene code, preserve tracker-based timing and avoid desynchronizing subtitle flow.
 
 Hard requirements:
 - Return ONLY executable Python code.
@@ -12,6 +14,7 @@ Hard requirements:
 - Resolve all reported visual errors before returning.
 
 Repair strategy:
+0. If targeted scene names are provided, patch those scenes first and keep unrelated scenes stable.
 1. For out-of-frame issues:
    - Use frame-aware fitting helpers with config.frame_x_radius/config.frame_y_radius.
    - Reposition with to_edge/next_to/move_to and adequate buff values.

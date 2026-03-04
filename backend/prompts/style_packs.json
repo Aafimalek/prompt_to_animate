@@ -1,0 +1,95 @@
+{
+  "default_style": "classic_clean",
+  "styles": {
+    "classic_clean": {
+      "label": "Classic Clean",
+      "description": "Balanced educational layout with high readability.",
+      "palette": {
+        "background": "#0F1115",
+        "primary": "#53D2DC",
+        "secondary": "#F8D66D",
+        "accent": "#F36B6B",
+        "text": "#F5F7FA"
+      },
+      "typography": {
+        "title_font_size": 50,
+        "body_font_size": 34,
+        "equation_font_size": 42
+      },
+      "spacing": {
+        "edge_buffer": 0.5,
+        "group_buffer": 0.4,
+        "line_gap": 0.25
+      },
+      "motion": {
+        "default_run_time": 1.2,
+        "transition_run_time": 0.9,
+        "rate_function": "smooth"
+      },
+      "camera": {
+        "zoom_margin": 0.8,
+        "pan_smoothing": 1.0
+      }
+    },
+    "neon_grid": {
+      "label": "Neon Grid",
+      "description": "High-contrast modern look with geometric rhythm.",
+      "palette": {
+        "background": "#05070D",
+        "primary": "#00E5FF",
+        "secondary": "#FFEB3B",
+        "accent": "#FF5E8A",
+        "text": "#EAF3FF"
+      },
+      "typography": {
+        "title_font_size": 52,
+        "body_font_size": 33,
+        "equation_font_size": 44
+      },
+      "spacing": {
+        "edge_buffer": 0.55,
+        "group_buffer": 0.42,
+        "line_gap": 0.24
+      },
+      "motion": {
+        "default_run_time": 1.1,
+        "transition_run_time": 0.85,
+        "rate_function": "ease_in_out_sine"
+      },
+      "camera": {
+        "zoom_margin": 0.95,
+        "pan_smoothing": 1.1
+      }
+    },
+    "paper_math": {
+      "label": "Paper Math",
+      "description": "Notebook-inspired style with softer color accents.",
+      "palette": {
+        "background": "#F8F5EE",
+        "primary": "#2F4858",
+        "secondary": "#5A7D7C",
+        "accent": "#D95D39",
+        "text": "#1E2328"
+      },
+      "typography": {
+        "title_font_size": 48,
+        "body_font_size": 32,
+        "equation_font_size": 40
+      },
+      "spacing": {
+        "edge_buffer": 0.6,
+        "group_buffer": 0.45,
+        "line_gap": 0.28
+      },
+      "motion": {
+        "default_run_time": 1.3,
+        "transition_run_time": 1.0,
+        "rate_function": "smooth"
+      },
+      "camera": {
+        "zoom_margin": 0.75,
+        "pan_smoothing": 0.9
+      }
+    }
+  }
+}

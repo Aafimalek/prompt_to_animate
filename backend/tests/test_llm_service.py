@@ -124,6 +124,22 @@ class GenScene(Scene):
     assert any("avoid LaTeX macro '\\checkmark'" in error for error in errors)
 
 
+def test_validate_code_requires_voiceover_import_when_voiceover_scene_used():
+    bad_code = """from manim import *
+
+class GenScene(VoiceoverScene):
+    def construct(self):
+        self.wait(1)
+        self.wait(1)
+        self.wait(1)
+        self.wait(1)
+        self.wait(1)
+        self.wait(1)
+"""
+    errors = llm_service.validate_code(bad_code, "Medium (15s)")
+    assert any("missing `from manim_voiceover import VoiceoverScene`" in error for error in errors)
+
+
 def test_validate_code_detects_2d_array_added_to_3d_point():
     bad_code = """from manim import *
 import numpy as np
@@ -144,10 +160,10 @@ class GenScene(Scene):
 
 
 def test_generate_manim_code_repairs_after_first_invalid_attempt(monkeypatch):
-    async def fake_compose_scene_plan(prompt: str, length: str):
+    async def fake_compose_scene_plan(prompt: str, length: str, **kwargs):
         return VALID_SCENE_PLAN
 
-    async def fake_generate_code_from_plan(prompt: str, length: str, scene_plan):
+    async def fake_generate_code_from_plan(prompt: str, length: str, scene_plan, **kwargs):
         return """from manim import *
 
 class GenScene(Scene):
@@ -182,10 +198,10 @@ class GenScene(Scene):
 
 
 def test_generate_manim_code_fails_after_two_repairs(monkeypatch):
-    async def fake_compose_scene_plan(prompt: str, length: str):
+    async def fake_compose_scene_plan(prompt: str, length: str, **kwargs):
         return VALID_SCENE_PLAN
 
-    async def fake_generate_code_from_plan(prompt: str, length: str, scene_plan):
+    async def fake_generate_code_from_plan(prompt: str, length: str, scene_plan, **kwargs):
         return "class Broken: pass"
 
     async def fake_repair_code(prompt: str, length: str, scene_plan, bad_code: str, errors):
@@ -355,7 +371,7 @@ def test_repair_code_from_runtime_error_rejects_invalid_code(monkeypatch):
         assert "Runtime repair produced invalid code" in str(exc)
 
 
-def test_force_pad_wait_calls_adds_missing_waits():
+def test_force_pad_wait_calls_adds_missing_waits(monkeypatch):
     code = """from manim import *
 
 class GenScene(Scene):
@@ -363,9 +379,57 @@ class GenScene(Scene):
         self.play(Create(Circle()))
         self.wait(1)
 """
+    monkeypatch.setattr(llm_service, "MANIM_TIMELINE_PACING_ENABLED", False)
     patched = llm_service._force_pad_wait_calls(code, "Extended (5m)")
     waits = patched.count("self.wait(")
     assert waits >= 55
+
+
+def test_auto_pad_wait_calls_skips_padding_when_timeline_enabled(monkeypatch):
+    code = """from manim import *
+
+class GenScene(Scene):
+    def construct(self):
+        self.play(Create(Circle()))
+"""
+    monkeypatch.setattr(llm_service, "MANIM_TIMELINE_PACING_ENABLED", True)
+    patched = llm_service._auto_pad_wait_calls(code, "Extended (5m)")
+    assert patched == code
+
+
+def test_infer_problem_scene_names_maps_issue_frames_to_scene_windows():
+    scene_plan = {
+        "scenes": [
+            {"name": "Intro", "duration_seconds": 10},
+            {"name": "Main Idea", "duration_seconds": 20},
+        ]
+    }
+    report = {
+        "frames_analyzed": 4,
+        "issues": [
+            {"frame_index": 0, "issue_type": "near_frame_edge"},
+            {"frame_index": 3, "issue_type": "out_of_frame"},
+        ],
+    }
+    names = llm_service._infer_problem_scene_names(scene_plan, report)
+    assert names == ["Intro", "Main Idea"]
+
+
+def test_apply_scene_editor_layout_edits_returns_valid_code(monkeypatch):
+    async def fake_invoke(prompt_template, payload, operation):
+        return VALID_MEDIUM_CODE
+
+    monkeypatch.setattr(llm_service, "_invoke_with_resilience", fake_invoke)
+
+    result = asyncio.run(
+        llm_service.apply_scene_editor_layout_edits(
+            length="Medium (15s)",
+            bad_code="class Broken: pass",
+            edits=[],
+        )
+    )
+
+    assert result.startswith("from manim import *")
 
 
 def test_normalize_scene_plan_requires_layout_fields():
@@ -391,10 +455,10 @@ def test_normalize_scene_plan_requires_layout_fields():
 
 
 def test_generate_manim_code_visual_qa_repairs_once(monkeypatch):
-    async def fake_compose_scene_plan(prompt: str, length: str):
+    async def fake_compose_scene_plan(prompt: str, length: str, **kwargs):
         return VALID_SCENE_PLAN
 
-    async def fake_generate_code_from_plan(prompt: str, length: str, scene_plan):
+    async def fake_generate_code_from_plan(prompt: str, length: str, scene_plan, **kwargs):
         return VALID_MEDIUM_CODE
 
     reports = [
@@ -424,7 +488,7 @@ def test_generate_manim_code_visual_qa_repairs_once(monkeypatch):
         },
     ]
 
-    def fake_visual_qa(code: str, mode: str):
+    def fake_visual_qa(code: str, mode: str, topic_hint: str = ""):
         return reports.pop(0)
 
     async def fake_visual_repair(prompt: str, length: str, scene_plan, bad_code: str, quality_report):
@@ -437,6 +501,7 @@ def test_generate_manim_code_visual_qa_repairs_once(monkeypatch):
     monkeypatch.setattr(llm_service, "MANIM_VISUAL_QA_ENABLED", True)
     monkeypatch.setattr(llm_service, "MANIM_VISUAL_QA_MAX_REPAIRS", 1)
     monkeypatch.setattr(llm_service, "MANIM_VISUAL_QA_MODE", "balanced")
+    monkeypatch.setattr(llm_service, "MANIM_MULTI_CANDIDATE_ENABLED", False)
 
     result = asyncio.run(
         llm_service.generate_manim_code(
@@ -448,13 +513,13 @@ def test_generate_manim_code_visual_qa_repairs_once(monkeypatch):
 
 
 def test_generate_manim_code_visual_qa_failure_after_retry(monkeypatch):
-    async def fake_compose_scene_plan(prompt: str, length: str):
+    async def fake_compose_scene_plan(prompt: str, length: str, **kwargs):
         return VALID_SCENE_PLAN
 
-    async def fake_generate_code_from_plan(prompt: str, length: str, scene_plan):
+    async def fake_generate_code_from_plan(prompt: str, length: str, scene_plan, **kwargs):
         return VALID_MEDIUM_CODE
 
-    def fake_visual_qa(code: str, mode: str):
+    def fake_visual_qa(code: str, mode: str, topic_hint: str = ""):
         return {
             "passed": False,
             "score": 50,
@@ -482,6 +547,7 @@ def test_generate_manim_code_visual_qa_failure_after_retry(monkeypatch):
     monkeypatch.setattr(llm_service, "MANIM_VISUAL_QA_ENABLED", True)
     monkeypatch.setattr(llm_service, "MANIM_VISUAL_QA_MAX_REPAIRS", 1)
     monkeypatch.setattr(llm_service, "MANIM_VISUAL_QA_MODE", "balanced")
+    monkeypatch.setattr(llm_service, "MANIM_MULTI_CANDIDATE_ENABLED", False)
 
     try:
         asyncio.run(llm_service.generate_manim_code("Bad", "Medium (15s)"))

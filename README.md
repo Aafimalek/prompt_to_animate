@@ -832,7 +832,11 @@ Streaming endpoint using Server-Sent Events (SSE).
   "prompt": "Explain the Pythagorean theorem",
   "length": "Medium (15s)",
   "resolution": "1080p",
-  "clerk_id": "user_abc123"
+  "clerk_id": "user_abc123",
+  "style_pack": "classic_clean",
+  "voiceover_mode": "none",
+  "voiceover_text": "",
+  "export_mode": "video"
 }
 ```
 
@@ -845,7 +849,15 @@ data: {"step": 1, "status": "analyzing", "message": "Analyzing your prompt..."}
 
 data: {"step": 2, "status": "composing", "message": "Composing internal scene plan..."}
 
+data: {"step": 2, "status": "retrieving_memory", "message": "Retrieving high-quality scene memories..."}
+
+data: {"step": 2, "status": "selecting_style", "message": "Selecting visual style pack..."}
+
 data: {"step": 3, "status": "generating", "message": "Generating Manim code from scene plan..."}
+
+data: {"step": 3, "status": "candidate_generating", "message": "Generating 3 code candidate(s)..."}
+
+data: {"step": 4, "status": "candidate_scoring", "message": "Scoring candidates with reward model..."}
 
 data: {"step": 4, "status": "validating", "message": "Validating generated code..."}
 
@@ -861,6 +873,19 @@ data: {"step": 5, "status": "finalizing", "message": "Uploading to cloud storage
 
 data: {"step": 6, "status": "complete", "message": "Video ready!", "video_url": "...", "code": "...", "chat_id": "..."}
 ```
+
+Additional advanced endpoints:
+
+- `GET /style-packs`
+- `POST /scene-editor/partial-render`
+- `POST /export/interactive`
+- `GET /scene-memory/search?prompt=...&top_k=3`
+- `POST /feedback/quality`
+- `POST /chats/{clerk_id}/{chat_id}/comments`
+- `GET /chats/{clerk_id}/{chat_id}/comments`
+- `POST /chats/{clerk_id}/{chat_id}/variants`
+- `GET /chats/{clerk_id}/{chat_id}/variants`
+- `GET /chats/{clerk_id}/{chat_id}/variants/{variant_id}/diff`
 
 #### `GET /chats/{clerk_id}`
 
@@ -1006,6 +1031,7 @@ Runtime prompt behavior is versioned under `backend/prompts/`:
 - `repair_system.md` - targeted repair instructions
 - `runtime_repair_system.md` - runtime failure focused repair prompt
 - `visual_repair_system.md` - visual-quality focused repair prompt
+- `scene_editor_system.md` - targeted layout edit prompt for interactive scene editing
 - `length_profiles.json` - duration and pacing constraints by length
 
 The backend enforces a strict validation gate before rendering:
@@ -1013,10 +1039,11 @@ The backend enforces a strict validation gate before rendering:
 - Syntax validation (`ast.parse`)
 - Required `from manim import *`
 - Required `GenScene` scene class
-- `wait()` pacing thresholds per selected length
+- Duration-based pacing thresholds per selected length profile
 - Anti-pattern checks (for example, raw mobjects in `self.play(...)`)
 - Unicode math symbol checks inside `MathTex`/`Tex`
 - Automatic repair retries (max 2) before hard failure
+- Automatic timing rescale to fit target duration window
 
 Visual quality gate (feature flagged):
 
@@ -1025,6 +1052,7 @@ Visual quality gate (feature flagged):
 - Text overlap detection
 - Crowding warnings and score-based pass/fail (`score >= 85`, zero visual errors)
 - Optional one visual repair retry in `balanced` mode
+- Optional VLM keyframe critic hook for additional visual feedback
 
 Visual QA environment flags:
 
@@ -1032,6 +1060,20 @@ Visual QA environment flags:
 - `MANIM_VISUAL_QA_MODE=balanced` (`balanced` or `max`)
 - `MANIM_VISUAL_QA_MAX_REPAIRS=1`
 - `MANIM_VISUAL_QA_LOG_ARTIFACTS=false`
+- `MANIM_VLM_CRITIC_ENABLED=false`
+- `MANIM_VLM_CRITIC_FRAME_COUNT=1`
+
+Advanced generation flags:
+
+- `MANIM_TIMELINE_PACING_ENABLED=true`
+- `MANIM_PACING_TOLERANCE_SECONDS=12`
+- `MANIM_AUTO_TIMESCALE_ENABLED=true`
+- `MANIM_MULTI_CANDIDATE_ENABLED=true`
+- `MANIM_MULTI_CANDIDATE_COUNT=3`
+- `MANIM_MULTI_CANDIDATE_VISUAL_QA=true`
+- `MANIM_SCENE_MEMORY_ENABLED=true`
+- `MANIM_SCENE_MEMORY_TOP_K=3`
+- `MANIM_REWARD_WEIGHTS_PATH=backend/benchmarks/reward_weights.json`
 
 Render/runtime environment flags:
 

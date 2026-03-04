@@ -305,3 +305,60 @@ def load_snapshots(path: Path) -> Dict[str, Any]:
 def analyze_visual_log_file(path: Path, mode: str = "balanced") -> QualityReport:
     payload = load_snapshots(path)
     return analyze_visual_snapshots(payload, mode=mode)
+
+
+def merge_external_issues(
+    report: Dict[str, Any],
+    external_issues: List[Dict[str, Any]],
+    source_label: str = "external",
+) -> Dict[str, Any]:
+    if not isinstance(report, dict):
+        report = {
+            "passed": False,
+            "score": 0,
+            "error_count": 0,
+            "warning_count": 0,
+            "issues": [],
+            "metrics": {},
+        }
+    issues = report.get("issues")
+    if not isinstance(issues, list):
+        issues = []
+    for issue in external_issues:
+        if not isinstance(issue, dict):
+            continue
+        enriched = {
+            "severity": str(issue.get("severity", "warning")),
+            "issue_type": str(issue.get("issue_type", "external_feedback")),
+            "message": str(issue.get("message", "External visual feedback")),
+            "frame_index": int(issue.get("frame_index", -1)),
+            "details": {
+                **(issue.get("details", {}) if isinstance(issue.get("details"), dict) else {}),
+                "source": source_label,
+            },
+        }
+        issues.append(enriched)
+
+    error_count = sum(1 for issue in issues if str(issue.get("severity")) == "error")
+    warning_count = sum(1 for issue in issues if str(issue.get("severity")) == "warning")
+    base_score = int(report.get("score", 100))
+    score = max(0, min(100, base_score - error_count * 10 - warning_count * 2))
+    passed = error_count == 0 and score >= 85
+
+    metrics = report.get("metrics")
+    if not isinstance(metrics, dict):
+        metrics = {}
+    metrics["external_issue_count"] = len(external_issues)
+    metrics["external_issue_source"] = source_label
+
+    report.update(
+        {
+            "issues": issues,
+            "error_count": error_count,
+            "warning_count": warning_count,
+            "score": score,
+            "passed": passed,
+            "metrics": metrics,
+        }
+    )
+    return report

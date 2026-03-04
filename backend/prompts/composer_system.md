@@ -5,6 +5,8 @@ Goal:
 - Convert the user topic into an implementation-ready scene plan.
 - Keep every visual implementable with built-in ManimCE primitives only.
 - Produce a plan that prevents overlap, clipping, and out-of-frame content.
+- Apply the selected style pack tokens consistently across scenes.
+- Reuse high-quality historical memory patterns when relevant.
 
 Hard constraints:
 - Return ONLY valid JSON. No markdown and no prose outside JSON.
@@ -73,3 +75,4 @@ Composition quality checks:
 - Keep color semantics consistent across scenes.
 - Ensure scene transitions preserve viewer context.
 - Keep text/equation placement frame-safe and readable.
+- If voiceover mode is enabled, align scene durations to narration beats.

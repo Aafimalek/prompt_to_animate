@@ -1,14 +1,16 @@
 ﻿import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, List, Optional, Tuple
 
-from .visual_quality import analyze_visual_log_file
+from .visual_quality import analyze_visual_log_file, merge_external_issues
+from .vlm_critic import run_vlm_keyframe_critic
 
 # Resolution to Manim quality flag mapping
 QUALITY_FLAGS = {
@@ -58,6 +60,10 @@ def _load_int_env(name: str, default: int, minimum: int) -> int:
     except ValueError:
         return default
     return max(minimum, value)
+
+
+MANIM_VLM_CRITIC_ENABLED = _load_bool_env("MANIM_VLM_CRITIC_ENABLED", default=False)
+MANIM_VLM_CRITIC_FRAME_COUNT = _load_int_env("MANIM_VLM_CRITIC_FRAME_COUNT", default=1, minimum=1)
 
 
 def _get_runtime_temp_dir() -> Path:
@@ -118,6 +124,7 @@ def _run_manim(
     media_dir: Path,
     timeout_seconds: int,
     extra_env: Dict[str, str] | None = None,
+    extra_args: List[str] | None = None,
 ) -> subprocess.CompletedProcess:
     cmd = [
         sys.executable,
@@ -127,9 +134,10 @@ def _run_manim(
         "--disable_caching",
         "--media_dir",
         str(media_dir),
-        str(script_path),
-        scene_name,
     ]
+    if extra_args:
+        cmd.extend(extra_args)
+    cmd.extend([str(script_path), scene_name])
 
     env = os.environ.copy()
     if extra_env:
@@ -169,11 +177,71 @@ def _cleanup_script_and_scene(script_path: Path, scene_folder: Path) -> None:
         pass
 
 
+def _truncate_code_to_sections(code: str, keep_sections: int) -> str:
+    """
+    Keep only the first N construct sections identified by comments.
+
+    A section marker is any comment line inside construct() starting with:
+      - # section ...
+      - # scene ...
+      - # --- ...
+    """
+    if keep_sections <= 0:
+        return code
+
+    lines = code.split("\n")
+    section_pattern = re.compile(r"^\s*#\s*(section|scene|---)", flags=re.IGNORECASE)
+
+    def _indent_of(line: str) -> int:
+        return len(line) - len(line.lstrip())
+
+    construct_index = -1
+    construct_indent = 0
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("def construct(") and stripped.endswith(":"):
+            construct_index = idx
+            construct_indent = _indent_of(line)
+            break
+
+    if construct_index < 0:
+        return code
+
+    section_count = 0
+    insert_return_at: Optional[int] = None
+    for idx in range(construct_index + 1, len(lines)):
+        line = lines[idx]
+        stripped = line.strip()
+        if stripped and _indent_of(line) <= construct_indent:
+            break
+        if section_pattern.match(line):
+            section_count += 1
+            if section_count > keep_sections:
+                insert_return_at = idx
+                break
+
+    if insert_return_at is None:
+        return code
+
+    body_indent = construct_indent + 4
+    for idx in range(construct_index + 1, len(lines)):
+        stripped = lines[idx].strip()
+        if not stripped:
+            continue
+        if _indent_of(lines[idx]) > construct_indent:
+            body_indent = _indent_of(lines[idx])
+            break
+
+    lines.insert(insert_return_at, " " * body_indent + "return")
+    return "\n".join(lines)
+
+
 def execute_manim_code(
     code: str,
     upload_to_s3: bool = True,
     resolution: str = "1080p",
     length: str | None = None,
+    preview_sections: int | None = None,
 ) -> tuple[str, str]:
     """
     Execute Manim code and return the uploaded S3 key and/or local output filename.
@@ -184,7 +252,11 @@ def execute_manim_code(
     temp_dir = _get_runtime_temp_dir()
     temp_dir.mkdir(parents=True, exist_ok=True)
     filepath = temp_dir / filename
-    filepath.write_text(code, encoding="utf-8")
+    render_code = code
+    if preview_sections is not None and preview_sections > 0:
+        render_code = _truncate_code_to_sections(code, preview_sections)
+
+    filepath.write_text(render_code, encoding="utf-8")
 
     output_root = Path("generated_animations").resolve()
     output_root.mkdir(parents=True, exist_ok=True)
@@ -339,7 +411,43 @@ class {QA_SCENE_CLASS}(GenScene):
     return f"{code.rstrip()}\n{qa_wrapper}\n"
 
 
-def run_visual_quality_check(code: str, mode: str = "balanced") -> Dict[str, object]:
+def _render_vlm_keyframes(
+    script_path: Path,
+    output_root: Path,
+    frame_count: int,
+) -> List[Path]:
+    if frame_count <= 0:
+        return []
+
+    try:
+        result = _run_manim(
+            script_path=script_path,
+            scene_name=QA_SCENE_CLASS,
+            quality_flag=QA_QUALITY_FLAG,
+            media_dir=output_root,
+            timeout_seconds=min(QA_TIMEOUT_SECONDS, 90),
+            extra_args=["-s", "--format", "png"],
+        )
+    except Exception:
+        return []
+
+    if result.returncode != 0:
+        return []
+
+    scene_name = script_path.stem
+    image_folder = output_root / "images" / scene_name
+    if not image_folder.exists():
+        return []
+
+    images = sorted(image_folder.rglob("*.png"))
+    return images[: max(1, frame_count)]
+
+
+def run_visual_quality_check(
+    code: str,
+    mode: str = "balanced",
+    topic_hint: str = "",
+) -> Dict[str, object]:
     """
     Run a low-quality QA render and return visual quality diagnostics.
     """
@@ -391,6 +499,16 @@ def run_visual_quality_check(code: str, mode: str = "balanced") -> Dict[str, obj
         raise Exception("Visual QA failed: report file was not generated.")
 
     report = analyze_visual_log_file(report_path, mode=mode).to_dict()
+
+    if MANIM_VLM_CRITIC_ENABLED:
+        keyframes = _render_vlm_keyframes(
+            script_path=script_path,
+            output_root=output_root,
+            frame_count=MANIM_VLM_CRITIC_FRAME_COUNT,
+        )
+        vlm_issues = run_vlm_keyframe_critic(keyframes, topic_hint=topic_hint)
+        if vlm_issues:
+            report = merge_external_issues(report, vlm_issues, source_label="vlm")
 
     keep_artifacts = _load_bool_env("MANIM_VISUAL_QA_LOG_ARTIFACTS", default=False)
     if not keep_artifacts:
