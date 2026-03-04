@@ -25,6 +25,11 @@ Expected edit patterns (examples):
 - increase/decrease spacing between labels
 - re-anchor title/subtitle/main visual zones
 - clear stale labels before adding new dense content
+- If edit has `action: "set_box"` or `action: "reframe_object"` with `normalized_box`,
+  interpret it as:
+  - target object's center should be in that box
+  - target object's width/height should fit inside that box
+  - keep object fully in frame
 
 Output rules:
 - Return code only.

@@ -615,6 +615,7 @@ async def apply_layout_edits(request: SceneLayoutEditRequest):
             bad_code=request.code,
             edits=request.edits,
         )
+        changed = edited_code.strip() != request.code.strip()
 
         preview_url = ""
         if request.render_preview:
@@ -632,6 +633,7 @@ async def apply_layout_edits(request: SceneLayoutEditRequest):
             "status": "ok",
             "code": edited_code,
             "preview_url": preview_url,
+            "changed": changed,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

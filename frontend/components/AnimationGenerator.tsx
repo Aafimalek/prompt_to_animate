@@ -21,6 +21,12 @@ interface ProgressStep {
     code?: string;
     chat_id?: string;  // MongoDB chat ID
     style_pack?: string;
+    export_mode?: string;
+    interactive_outline?: string;
+    voiceover_script?: Record<string, unknown>;
+    voiceover_requested_mode?: string;
+    voiceover_effective_mode?: string;
+    voiceover_fallback_reason?: string;
     interactive_manifest?: Record<string, unknown>;
     quality_report?: Record<string, unknown>;
 }
@@ -56,6 +62,16 @@ interface ActiveLayoutPointer {
     originY: number;
     originWidth: number;
     originHeight: number;
+}
+
+interface GenerationMeta {
+    style_pack?: string;
+    export_mode?: string;
+    interactive_manifest?: Record<string, unknown> | null;
+    interactive_outline?: string;
+    voiceover_requested_mode?: string;
+    voiceover_effective_mode?: string;
+    voiceover_fallback_reason?: string;
 }
 
 const PROGRESS_STEPS = [
@@ -98,6 +114,8 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
     const [layoutBoxes, setLayoutBoxes] = useState<LayoutBox[]>([]);
     const [activeLayoutPointer, setActiveLayoutPointer] = useState<ActiveLayoutPointer | null>(null);
     const layoutCanvasRef = useRef<HTMLDivElement | null>(null);
+    const [layoutPreset, setLayoutPreset] = useState('none');
+    const [generationMeta, setGenerationMeta] = useState<GenerationMeta | null>(null);
 
     // Fetch usage on mount and after generation
     const fetchUsage = async () => {
@@ -182,6 +200,7 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
         setCode(null);
         setCurrentProgress(null);
         setLayoutEditError(null);
+        setGenerationMeta(null);
 
         try {
             const response = await fetch(`${API_BASE_URL}/generate-stream`, {
@@ -237,6 +256,15 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
                             if (data.status === 'complete' && data.video_url && data.code) {
                                 setVideoUrl(data.video_url);
                                 setCode(data.code);
+                                setGenerationMeta({
+                                    style_pack: data.style_pack,
+                                    export_mode: data.export_mode,
+                                    interactive_manifest: data.interactive_manifest || null,
+                                    interactive_outline: data.interactive_outline || '',
+                                    voiceover_requested_mode: data.voiceover_requested_mode,
+                                    voiceover_effective_mode: data.voiceover_effective_mode,
+                                    voiceover_fallback_reason: data.voiceover_fallback_reason,
+                                });
                                 completed = true;
 
                                 // Notify parent to save/update history
@@ -267,6 +295,15 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
                     if (data.status === 'complete' && data.video_url && data.code && !completed) {
                         setVideoUrl(data.video_url);
                         setCode(data.code);
+                        setGenerationMeta({
+                            style_pack: data.style_pack,
+                            export_mode: data.export_mode,
+                            interactive_manifest: data.interactive_manifest || null,
+                            interactive_outline: data.interactive_outline || '',
+                            voiceover_requested_mode: data.voiceover_requested_mode,
+                            voiceover_effective_mode: data.voiceover_effective_mode,
+                            voiceover_fallback_reason: data.voiceover_fallback_reason,
+                        });
                         completed = true;
                         onGenerateComplete({
                             id: data.chat_id || crypto.randomUUID(),
@@ -325,7 +362,7 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
                     edits: parsedEdits,
                     resolution,
                     render_preview: true,
-                    preview_sections: 1,
+                    preview_sections: 3,
                 }),
             });
 
@@ -340,6 +377,11 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
             if (typeof data.preview_url === 'string' && data.preview_url.trim()) {
                 setVideoUrl(data.preview_url);
             }
+            if (data.changed === false) {
+                setLayoutEditError(
+                    'No code changes were produced. Use real object names from the code (for example: title, equation, graph).'
+                );
+            }
         } catch (err: unknown) {
             setLayoutEditError((err as Error).message || 'Failed to apply layout edits');
         } finally {
@@ -353,7 +395,7 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
             ...prev,
             {
                 id: crypto.randomUUID(),
-                label: `object_${nextIndex}`,
+                label: nextIndex === 1 ? 'title' : `object_${nextIndex}`,
                 x: 0.1,
                 y: 0.1,
                 width: 0.25,
@@ -369,16 +411,50 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
     const exportCanvasEditsToJson = () => {
         const edits = layoutBoxes.map((box) => ({
             object: box.label || box.id,
-            action: "set_box",
+            action: "reframe_object",
             normalized_box: {
                 x: Number(box.x.toFixed(4)),
                 y: Number(box.y.toFixed(4)),
                 width: Number(box.width.toFixed(4)),
                 height: Number(box.height.toFixed(4)),
             },
+            instruction: `Keep '${box.label || box.id}' fully visible inside this normalized box`,
         }));
         setLayoutEditsJson(JSON.stringify(edits, null, 2));
     };
+
+    const applyLayoutPreset = () => {
+        if (layoutPreset === 'none') return;
+        const presets: Record<string, unknown[]> = {
+            safe_title_formula: [
+                { object: "title", action: "move_to_edge", edge: "UP", buff: 0.4 },
+                { object: "equation", action: "move_to_edge", edge: "DOWN", buff: 0.5 },
+                { action: "instruction", instruction: "Keep main visual centered and avoid overlap with title/equation." },
+            ],
+            spread_labels: [
+                { action: "instruction", instruction: "Reduce concurrent labels and spread text groups with larger buff values." },
+                { action: "instruction", instruction: "Use VGroup(...).arrange(DOWN, buff=0.35+) for stacked labels." },
+            ],
+            center_focus: [
+                { object: "main_visual", action: "reframe_object", normalized_box: { x: 0.2, y: 0.2, width: 0.6, height: 0.6 } },
+                { action: "instruction", instruction: "Move secondary annotations near frame edges with safe margins." },
+            ],
+        };
+        const edits = presets[layoutPreset] || [];
+        setLayoutEditsJson(JSON.stringify(edits, null, 2));
+    };
+
+    const selectedStyleMeta = styleCatalog?.styles?.[stylePack];
+    const voiceoverModeHint =
+        voiceoverMode === 'none'
+            ? 'No narration instructions are sent.'
+            : 'Narration chunks are generated/aligned and injected into codegen.';
+    const exportModeHint =
+        exportMode === 'video'
+            ? 'Standard MP4 output.'
+            : exportMode === 'interactive'
+                ? 'Adds chapter manifest metadata for scrubbing.'
+                : 'Adds chapter manifest + slide outline.';
 
     const beginLayoutPointer = (
         event: React.MouseEvent,
@@ -521,6 +597,23 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
                                 className="w-full px-3 py-2 rounded-lg text-xs bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-800 dark:text-zinc-100"
                             />
                         )}
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-[11px]">
+                            <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/60 px-2.5 py-2">
+                                <p className="font-semibold text-zinc-700 dark:text-zinc-200">Style Mode</p>
+                                <p className="text-zinc-500 dark:text-zinc-400 mt-0.5">
+                                    {selectedStyleMeta?.description || 'Applies visual tokens (palette, spacing, motion).'}
+                                </p>
+                            </div>
+                            <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/60 px-2.5 py-2">
+                                <p className="font-semibold text-zinc-700 dark:text-zinc-200">Voiceover Mode</p>
+                                <p className="text-zinc-500 dark:text-zinc-400 mt-0.5">{voiceoverModeHint}</p>
+                            </div>
+                            <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/60 px-2.5 py-2">
+                                <p className="font-semibold text-zinc-700 dark:text-zinc-200">Export Mode</p>
+                                <p className="text-zinc-500 dark:text-zinc-400 mt-0.5">{exportModeHint}</p>
+                            </div>
+                        </div>
 
                         <div className="flex flex-wrap items-center justify-between gap-2 md:gap-3 border-t border-zinc-100 dark:border-zinc-800 pt-2 md:pt-3">
                             {/* Controls Row - Dropdowns */}
@@ -858,6 +951,7 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
                                     className="text-center text-sm text-muted-foreground mt-4"
                                 >
                                     {currentProgress?.status === "selecting_style" && "Selecting a style pack..."}
+                                    {currentProgress?.status === "voiceover_fallback" && "Voiceover plugin unavailable, falling back safely..."}
                                     {currentProgress?.status === "retrieving_memory" && "Retrieving high-quality memory examples..."}
                                     {currentProgress?.step === 2 && "Composing a scene-by-scene plan..."}
                                     {currentProgress?.status === "candidate_generating" && "Generating multiple code candidates..."}
@@ -914,6 +1008,40 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
                                     </a>
                                 </div>
 
+                                {generationMeta && (
+                                    <div className="px-4 pt-1 space-y-2">
+                                        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                                            <span className="px-2 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200">
+                                                Style: {generationMeta.style_pack || stylePack}
+                                            </span>
+                                            <span className="px-2 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200">
+                                                Export: {generationMeta.export_mode || exportMode}
+                                            </span>
+                                            <span className="px-2 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200">
+                                                Voiceover: {generationMeta.voiceover_effective_mode || 'none'}
+                                            </span>
+                                        </div>
+                                        {generationMeta.voiceover_fallback_reason && (
+                                            <p className="text-xs text-amber-600 dark:text-amber-400">
+                                                {generationMeta.voiceover_fallback_reason}
+                                            </p>
+                                        )}
+                                        {generationMeta.interactive_outline && (
+                                            <details className="group">
+                                                <summary className="cursor-pointer list-none flex items-center space-x-2 text-muted-foreground hover:text-foreground transition-colors text-xs font-medium content-none">
+                                                    <ChevronDown className="w-3 h-3 group-open:rotate-180 transition-transform" />
+                                                    <span>View Export Outline</span>
+                                                </summary>
+                                                <div className="mt-2 p-3 rounded-lg bg-zinc-900 dark:bg-zinc-950 border border-zinc-700 dark:border-zinc-800 overflow-x-auto">
+                                                    <pre className="text-zinc-200 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
+                                                        {generationMeta.interactive_outline}
+                                                    </pre>
+                                                </div>
+                                            </details>
+                                        )}
+                                    </div>
+                                )}
+
                                 {code && (
                                     <div className="px-4 pb-4">
                                         <details className="group">
@@ -933,6 +1061,34 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
                                                 <span>Scene Editor (Layout JSON)</span>
                                             </summary>
                                             <div className="mt-2 space-y-2">
+                                                <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/60 px-3 py-2 text-[11px] text-zinc-600 dark:text-zinc-300">
+                                                    Drag boxes to define target layout zones, then click <span className="font-semibold">Use Canvas in JSON</span>.
+                                                    Use labels that match actual objects in code (`title`, `equation`, `graph`) for better edits.
+                                                </div>
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <select
+                                                        value={layoutPreset}
+                                                        onChange={(e) => setLayoutPreset(e.target.value)}
+                                                        className="px-3 py-1.5 rounded-md text-[11px] bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-800 dark:text-zinc-100"
+                                                    >
+                                                        <option value="none">Preset: None</option>
+                                                        <option value="safe_title_formula">Preset: Title + Formula Safe Zones</option>
+                                                        <option value="spread_labels">Preset: Spread Dense Labels</option>
+                                                        <option value="center_focus">Preset: Center Main Focus</option>
+                                                    </select>
+                                                    <button
+                                                        onClick={applyLayoutPreset}
+                                                        disabled={layoutPreset === 'none'}
+                                                        className={cn(
+                                                            "px-3 py-1.5 rounded-md text-[11px]",
+                                                            layoutPreset === 'none'
+                                                                ? "bg-zinc-800/50 text-zinc-500 cursor-not-allowed"
+                                                                : "bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+                                                        )}
+                                                    >
+                                                        Insert Preset JSON
+                                                    </button>
+                                                </div>
                                                 <div className="p-3 rounded-lg border border-zinc-700/80 bg-zinc-900/60 space-y-2">
                                                     <div
                                                         ref={layoutCanvasRef}

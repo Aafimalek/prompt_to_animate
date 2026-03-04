@@ -104,7 +104,7 @@ def _extract_clean_error(error_msg: str) -> str:
 
     clean_msg = "\n".join(filtered_lines)
     error_match = re.search(
-        r"(TypeError|AttributeError|ValueError|NameError|SyntaxError|KeyError|IndexError|RuntimeError|FileNotFoundError|OSError):\s*(.+)",
+        r"(TypeError|AttributeError|ValueError|NameError|SyntaxError|KeyError|IndexError|RuntimeError|FileNotFoundError|ModuleNotFoundError|ImportError|OSError):\s*(.+)",
         clean_msg,
     )
 

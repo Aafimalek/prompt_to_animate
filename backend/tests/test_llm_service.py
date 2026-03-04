@@ -554,3 +554,37 @@ def test_generate_manim_code_visual_qa_failure_after_retry(monkeypatch):
         assert False, "Expected ValueError"
     except ValueError as exc:
         assert "Visual quality gate failed" in str(exc)
+
+
+def test_generate_manim_code_voiceover_fallback_when_plugin_missing(monkeypatch):
+    captured_modes = []
+
+    async def fake_compose_scene_plan(prompt: str, length: str, **kwargs):
+        captured_modes.append(kwargs.get("voiceover_mode"))
+        return VALID_SCENE_PLAN
+
+    async def fake_generate_code_from_plan(prompt: str, length: str, scene_plan, **kwargs):
+        return VALID_MEDIUM_CODE
+
+    monkeypatch.setattr(llm_service, "compose_scene_plan", fake_compose_scene_plan)
+    monkeypatch.setattr(llm_service, "generate_code_from_plan", fake_generate_code_from_plan)
+    monkeypatch.setattr(llm_service, "MANIM_MULTI_CANDIDATE_ENABLED", False)
+    monkeypatch.setattr(llm_service, "MANIM_VISUAL_QA_ENABLED", False)
+    monkeypatch.setattr(llm_service, "MANIM_SCENE_MEMORY_ENABLED", False)
+    monkeypatch.setattr(llm_service, "_is_voiceover_plugin_available", lambda: False)
+    monkeypatch.setattr(llm_service, "MANIM_VOICEOVER_REQUIRE_PLUGIN", False)
+
+    result = asyncio.run(
+        llm_service.generate_manim_code_with_options(
+            prompt="Explain circles",
+            length="Medium (15s)",
+            voiceover_mode="scripted",
+            voiceover_text="Line one",
+            return_metadata=True,
+        )
+    )
+
+    assert result["voiceover_requested_mode"] == "scripted"
+    assert result["voiceover_effective_mode"] == "none"
+    assert "manim-voiceover is not installed" in result["voiceover_fallback_reason"]
+    assert captured_modes and captured_modes[0] == "none"

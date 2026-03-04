@@ -1,5 +1,6 @@
 import ast
 import asyncio
+import importlib.util
 import json
 import os
 import random
@@ -236,6 +237,7 @@ MANIM_MULTI_CANDIDATE_COUNT = _load_int_env("MANIM_MULTI_CANDIDATE_COUNT", defau
 MANIM_MULTI_CANDIDATE_VISUAL_QA = _load_bool_env("MANIM_MULTI_CANDIDATE_VISUAL_QA", default=True)
 MANIM_SCENE_MEMORY_ENABLED = _load_bool_env("MANIM_SCENE_MEMORY_ENABLED", default=True)
 MANIM_SCENE_MEMORY_TOP_K = _load_int_env("MANIM_SCENE_MEMORY_TOP_K", default=3, minimum=0)
+MANIM_VOICEOVER_REQUIRE_PLUGIN = _load_bool_env("MANIM_VOICEOVER_REQUIRE_PLUGIN", default=False)
 
 # Unified candidate list: Azure OpenAI first, then Groq, then Cerebras as fallback
 MODEL_CANDIDATES: List[Tuple[str, str]] = []
@@ -273,6 +275,11 @@ def _get_llm_client(provider: str, model_name: str):
         api_key=groq_api_key,
         temperature=LLM_TEMPERATURE,
     )
+
+
+@lru_cache(maxsize=1)
+def _is_voiceover_plugin_available() -> bool:
+    return importlib.util.find_spec("manim_voiceover") is not None
 
 
 # Backward compatibility for any direct imports/tests.
@@ -1953,6 +1960,74 @@ def _auto_scale_timing(code: str, length: str) -> str:
     return scaled
 
 
+def _neutralize_voiceover_dependency(code: str) -> str:
+    if not (code or "").strip():
+        return code
+
+    lines = code.split("\n")
+    filtered_lines: List[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("from manim_voiceover import"):
+            continue
+        if stripped.startswith("import manim_voiceover"):
+            continue
+        filtered_lines.append(line)
+    lines = filtered_lines
+
+    class_idx = -1
+    class_indent = 0
+    class_line_re = re.compile(r"^(\s*class\s+GenScene\s*\()([^\)]*)(\)\s*:)")
+    for i, line in enumerate(lines):
+        match = class_line_re.match(line)
+        if not match:
+            continue
+        class_idx = i
+        class_indent = len(line) - len(line.lstrip())
+        raw_bases = match.group(2)
+        bases = [
+            base.strip()
+            for base in raw_bases.split(",")
+            if base.strip() and base.strip() != "VoiceoverScene"
+        ]
+        if not bases:
+            bases = ["Scene"]
+        lines[i] = f"{match.group(1)}{', '.join(bases)}{match.group(3)}"
+        break
+
+    joined = "\n".join(lines)
+    if "self.voiceover(" not in joined:
+        return joined
+    if "def voiceover(" in joined:
+        return joined
+    if class_idx < 0:
+        return joined
+
+    method_indent = class_indent + 4
+    method_prefix = " " * method_indent
+    inner_prefix = " " * (method_indent + 4)
+    deep_prefix = " " * (method_indent + 8)
+    shim_lines = [
+        f"{method_prefix}def voiceover(self, text=\"\"):",
+        f"{inner_prefix}class _FallbackTracker:",
+        f"{deep_prefix}def __init__(self, text):",
+        f"{deep_prefix}    words = len(str(text).split())",
+        f"{deep_prefix}    self.duration = max(1.0, min(12.0, words * 0.35))",
+        f"{deep_prefix}def __enter__(self):",
+        f"{deep_prefix}    return self",
+        f"{deep_prefix}def __exit__(self, exc_type, exc, tb):",
+        f"{deep_prefix}    return False",
+        f"{inner_prefix}return _FallbackTracker(text)",
+        "",
+    ]
+
+    insert_at = class_idx + 1
+    while insert_at < len(lines) and not lines[insert_at].strip():
+        insert_at += 1
+    lines[insert_at:insert_at] = shim_lines
+    return "\n".join(lines)
+
+
 def _apply_all_auto_fixes(code: str, length: str, scene_plan: Dict[str, Any] | None = None) -> str:
     """Apply every mechanical auto-fix in sequence, then pad wait calls if needed.
 
@@ -1966,6 +2041,72 @@ def _apply_all_auto_fixes(code: str, length: str, scene_plan: Dict[str, Any] | N
     code = _auto_scale_timing(code, length)
     code = _auto_pad_wait_calls(code, length)
     return code
+
+
+def _apply_style_defaults(code: str, style_pack: Dict[str, Any] | None) -> str:
+    if not isinstance(style_pack, dict):
+        return code
+    tokens = style_pack.get("tokens")
+    if not isinstance(tokens, dict):
+        return code
+    palette = tokens.get("palette")
+    if not isinstance(palette, dict):
+        return code
+
+    background = str(palette.get("background", "")).strip()
+    text_color = str(palette.get("text", "")).strip()
+    primary_color = str(palette.get("primary", "")).strip()
+    if not any([background, text_color, primary_color]):
+        return code
+
+    lines = code.split("\n")
+
+    def _indent_of(line: str) -> int:
+        return len(line) - len(line.lstrip())
+
+    construct_index = -1
+    construct_indent = 0
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("def construct(") and stripped.endswith(":"):
+            construct_index = i
+            construct_indent = _indent_of(line)
+            break
+    if construct_index < 0:
+        return code
+
+    body_indent = construct_indent + 4
+    for j in range(construct_index + 1, len(lines)):
+        stripped = lines[j].strip()
+        if not stripped:
+            continue
+        if _indent_of(lines[j]) > construct_indent:
+            body_indent = _indent_of(lines[j])
+            break
+
+    insert_at = construct_index + 1
+    while insert_at < len(lines) and not lines[insert_at].strip():
+        insert_at += 1
+
+    inserts: List[str] = []
+    prefix = " " * body_indent
+    if background and "self.camera.background_color" not in code:
+        inserts.append(f'{prefix}self.camera.background_color = "{background}"')
+    if text_color:
+        if "Text.set_default(" not in code:
+            inserts.append(f'{prefix}Text.set_default(color="{text_color}")')
+        if "Tex.set_default(" not in code:
+            inserts.append(f'{prefix}Tex.set_default(color="{text_color}")')
+        if "MathTex.set_default(" not in code:
+            inserts.append(f'{prefix}MathTex.set_default(color="{text_color}")')
+    if primary_color and "VMobject.set_default(" not in code:
+        inserts.append(f'{prefix}VMobject.set_default(color="{primary_color}")')
+
+    if not inserts:
+        return code
+
+    lines[insert_at:insert_at] = inserts
+    return "\n".join(lines)
 
 
 def _estimate_render_cost(code: str) -> float:
@@ -2004,6 +2145,7 @@ async def _generate_and_score_candidate(
     style_pack: Dict[str, Any],
     memory_context: str,
     voiceover_script: Dict[str, Any],
+    allow_voiceover_runtime: bool,
     candidate_index: int,
     candidate_total: int,
     memory_similarity: float,
@@ -2029,6 +2171,9 @@ async def _generate_and_score_candidate(
             "scene_plan": scene_plan,
             "voiceover_script": voiceover_script,
         }
+    if not allow_voiceover_runtime:
+        code = _neutralize_voiceover_dependency(code)
+    code = _apply_style_defaults(code, style_pack)
     code = _apply_all_auto_fixes(code, length, scene_plan=scene_plan)
     errors = validate_code(code, length, scene_plan=scene_plan)
 
@@ -2084,6 +2229,21 @@ async def generate_manim_code_with_options(
     voiceover_text: str = "",
     return_metadata: bool = False,
 ) -> str | Dict[str, Any]:
+    requested_voiceover_mode = (voiceover_mode or "none").strip().lower() or "none"
+    effective_voiceover_mode = requested_voiceover_mode
+    voiceover_fallback_reason = ""
+    if effective_voiceover_mode != "none" and not _is_voiceover_plugin_available():
+        voiceover_fallback_reason = (
+            "manim-voiceover is not installed in the render environment; "
+            "falling back to non-voiceover generation."
+        )
+        if MANIM_VOICEOVER_REQUIRE_PLUGIN:
+            raise ValueError(voiceover_fallback_reason)
+        effective_voiceover_mode = "none"
+        voiceover_text = ""
+        _emit_progress(progress_callback, "voiceover_fallback", voiceover_fallback_reason)
+    voiceover_runtime_enabled = effective_voiceover_mode in {"scripted", "auto", "aligned"}
+
     _emit_progress(progress_callback, "selecting_style", "Selecting visual style pack...")
     resolved_style = resolve_style_pack(style_pack_name)
 
@@ -2116,7 +2276,7 @@ async def generate_manim_code_with_options(
                 length=length,
                 style_pack=resolved_style,
                 memory_context=memory_context,
-                voiceover_mode=voiceover_mode,
+                voiceover_mode=effective_voiceover_mode,
                 candidate_index=idx + 1,
                 candidate_total=candidate_total,
             )
@@ -2136,7 +2296,7 @@ async def generate_manim_code_with_options(
 
         candidate_scene_plan["style_pack"] = resolved_style.get("style_id", "classic_clean")
         candidate_voiceover_script = {"enabled": False, "chunks": []}
-        if voiceover_mode.strip().lower() in {"scripted", "auto", "aligned"}:
+        if effective_voiceover_mode in {"scripted", "auto", "aligned"}:
             candidate_voiceover_script = build_voiceover_script(
                 prompt=prompt,
                 scene_plan=candidate_scene_plan,
@@ -2150,6 +2310,7 @@ async def generate_manim_code_with_options(
             style_pack=resolved_style,
             memory_context=memory_context,
             voiceover_script=candidate_voiceover_script,
+            allow_voiceover_runtime=voiceover_runtime_enabled,
             candidate_index=idx + 1,
             candidate_total=candidate_total,
             memory_similarity=memory_similarity,
@@ -2180,11 +2341,15 @@ async def generate_manim_code_with_options(
             f"Repairing invalid code (attempt {retry}/{max_retries})...",
         )
         code = await repair_code(prompt, length, scene_plan, code, errors)
+        if not voiceover_runtime_enabled:
+            code = _neutralize_voiceover_dependency(code)
         _emit_progress(progress_callback, "validating", "Re-validating repaired code...")
         errors = validate_code(code, length, scene_plan=scene_plan)
 
     if errors:
         # Last-resort: apply all mechanical auto-fixes
+        if not voiceover_runtime_enabled:
+            code = _neutralize_voiceover_dependency(code)
         code = _apply_all_auto_fixes(code, length, scene_plan=scene_plan)
         errors = validate_code(code, length, scene_plan=scene_plan)
 
@@ -2260,6 +2425,8 @@ async def generate_manim_code_with_options(
                 bad_code=code,
                 quality_report=quality_report,
             )
+            if not voiceover_runtime_enabled:
+                code = _neutralize_voiceover_dependency(code)
 
     voiceover_metadata = script_to_voiceover_metadata(voiceover_script)
     metadata: Dict[str, Any] = {
@@ -2278,6 +2445,9 @@ async def generate_manim_code_with_options(
             for item in candidate_results
         ],
         "quality_report": last_quality_report,
+        "voiceover_requested_mode": requested_voiceover_mode,
+        "voiceover_effective_mode": effective_voiceover_mode,
+        "voiceover_fallback_reason": voiceover_fallback_reason,
     }
     if return_metadata:
         return metadata

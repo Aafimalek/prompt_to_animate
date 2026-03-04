@@ -117,6 +117,7 @@ def process_video_generation(
                 "retrieving_memory": 2,
                 "candidate_generating": 3,
                 "candidate_scoring": 4,
+                "voiceover_fallback": 2,
             }
             step = step_map.get(status, 4)
             report_progress(redis_conn, job_id, step, status, message)
@@ -137,6 +138,9 @@ def process_video_generation(
         quality_report = generation_bundle.get("quality_report", {}) or {}
         resolved_style_pack = str(generation_bundle.get("style_pack", style_pack or "classic_clean"))
         voiceover_script = generation_bundle.get("voiceover_script", {})
+        voiceover_requested_mode = str(generation_bundle.get("voiceover_requested_mode", voiceover_mode or "none"))
+        voiceover_effective_mode = str(generation_bundle.get("voiceover_effective_mode", voiceover_requested_mode))
+        voiceover_fallback_reason = str(generation_bundle.get("voiceover_fallback_reason", "") or "")
         
         from .manim_service import execute_manim_code
         max_render_repairs_raw = os.environ.get("MANIM_RENDER_REPAIR_ATTEMPTS", "2")
@@ -232,6 +236,9 @@ def process_video_generation(
             "quality_report": quality_report,
             "style_pack": resolved_style_pack,
             "voiceover_script": voiceover_script,
+            "voiceover_requested_mode": voiceover_requested_mode,
+            "voiceover_effective_mode": voiceover_effective_mode,
+            "voiceover_fallback_reason": voiceover_fallback_reason,
             "export_mode": export_mode,
             "interactive_manifest": interactive_manifest,
             "interactive_outline": interactive_outline,
@@ -295,6 +302,11 @@ def process_video_generation(
             "chat_id": chat_id,
             "style_pack": resolved_style_pack,
             "quality_report": quality_report,
+            "voiceover_script": voiceover_script,
+            "voiceover_requested_mode": voiceover_requested_mode,
+            "voiceover_effective_mode": voiceover_effective_mode,
+            "voiceover_fallback_reason": voiceover_fallback_reason,
+            "export_mode": export_mode,
             "interactive_manifest": interactive_manifest,
             "interactive_outline": interactive_outline,
         }
@@ -302,7 +314,13 @@ def process_video_generation(
                       video_url=video_url, code=code, chat_id=chat_id,
                       style_pack=resolved_style_pack,
                       quality_report=quality_report,
-                      interactive_manifest=interactive_manifest)
+                      voiceover_script=voiceover_script,
+                      voiceover_requested_mode=voiceover_requested_mode,
+                      voiceover_effective_mode=voiceover_effective_mode,
+                      voiceover_fallback_reason=voiceover_fallback_reason,
+                      export_mode=export_mode,
+                      interactive_manifest=interactive_manifest,
+                      interactive_outline=interactive_outline)
         
         # Also store the final result separately
         redis_conn.set(
