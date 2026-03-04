@@ -61,13 +61,25 @@ def execute_manim_code(code: str, upload_to_s3: bool = True, resolution: str = "
     
     print(f"Executing Manim (Cairo renderer): {' '.join(cmd)}")
     
-    # Run process
+    # Run process with timeout to prevent infinite hangs
+    RENDER_TIMEOUT_SECONDS = 180  # 3 minutes max for a single render
     try:
         result = subprocess.run(
             cmd, 
             capture_output=True, 
             text=True, 
-            check=False
+            check=False,
+            timeout=RENDER_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        # Clean up the temp script on timeout
+        try:
+            os.remove(filepath)
+        except OSError:
+            pass
+        raise Exception(
+            f"Code error (TimeoutError): Manim render exceeded {RENDER_TIMEOUT_SECONDS}s timeout. "
+            "Simplify the animation (fewer objects, lower resolution, shorter duration)."
         )
     except FileNotFoundError:
         raise Exception("Manim command not found. Please ensure manim is installed and in your PATH.")
@@ -100,13 +112,19 @@ def execute_manim_code(code: str, upload_to_s3: bool = True, resolution: str = "
         
         if error_match:
             error_type = error_match.group(1)
-            error_detail = error_match.group(2).strip()[:200]  # Limit length
+            error_detail = error_match.group(2).strip()[:500]  # Limit length
             clean_error = f"Code error ({error_type}): {error_detail}"
         else:
             # Get last meaningful lines
             meaningful = [l.strip() for l in filtered_lines if l.strip() and not l.startswith('+')]
             clean_error = meaningful[-1] if meaningful else "Rendering failed. Please try a simpler prompt."
         
+        # Clean up temp script on failure so orphaned files don't accumulate
+        try:
+            os.remove(filepath)
+        except OSError:
+            pass
+
         raise Exception(clean_error)
         
     # Locate the output file

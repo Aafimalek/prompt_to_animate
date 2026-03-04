@@ -46,6 +46,7 @@ PROMPT_FILES = {
     "composer_system": "composer_system.md",
     "codegen_system": "codegen_system.md",
     "repair_system": "repair_system.md",
+    "runtime_repair_system": "runtime_repair_system.md",
     "length_profiles": "length_profiles.json",
 }
 
@@ -98,36 +99,6 @@ FORBIDDEN_TEX_MACROS = {
 ProgressCallback = Optional[Callable[[str, str], None]]
 
 RETRYABLE_STATUS_CODES = {408, 409, 429, 500, 502, 503, 504}
-RUNTIME_REPAIR_SYSTEM_PROMPT = (
-    "You repair Manim Community Edition Python code that failed at render time.\n"
-    "Return executable code only, with no markdown fences or explanations.\n"
-    "Preserve the original educational intent, visual design, and length pacing requirements.\n\n"
-    "Common runtime fixes:\n"
-    "- LATEX MODE: Brace.get_text() creates a Tex (TEXT mode) object. NEVER put math "
-    "commands (\\vec, \\frac, \\cos, \\theta, \\lvert etc.) inside get_text(). "
-    "Use brace.get_tex(r'math expression') for math, or brace.get_text('plain text') "
-    "for plain labels. Similarly, Text() is Pango, not LaTeX — no LaTeX commands.\n"
-    "- COORDINATE DIMENSIONS: Manim uses 3D points everywhere. ALL coordinate arrays "
-    "MUST be 3D: np.array([x, y, 0]). NEVER pass 2D arrays like vec[:2] to Arrow, "
-    "Line, Dot, DashedLine, etc. get_center()/c2p() return 3D vectors; any manual "
-    "arrays combined with them must also be 3D. For scalar math (dot products, "
-    "projections) you may slice to 2D, but project the RESULT back to 3D before "
-    "passing to any Manim object: np.array([x, y, 0]).\n"
-    "- ANGLE CLASS: Angle(line1, line2, radius=0.5) — radius is keyword-only. "
-    "NEVER pass radius as a positional arg or you get 'multiple values' TypeError.\n"
-    "- RIGHTANGLE CLASS: RightAngle(line1, line2, length=0.2) — both lines MUST share "
-    "a common vertex point. length is keyword-only.\n"
-    "- Never pass raw mobjects to self.play(). Wrap with Create(), Write(), FadeIn(), or use .animate.\n"
-    "- Never use opacity=... as a constructor kwarg. Use fill_opacity= and stroke_opacity= instead.\n"
-    "- Always call self.set_camera_orientation() BEFORE adding 3D content in ThreeDScene.\n"
-    "- Use raw strings for LaTeX: MathTex(r'\\pi'), not MathTex('π').\n"
-    "- Use VGroup (not Group) for VMobject collections.\n"
-    "- Use .copy() when reusing a mobject that is already in the scene.\n"
-    "- ReplacementTransform(old, new) removes old; Transform(old, new) keeps old variable.\n"
-    "- Surface requires fill_opacity, not opacity.\n"
-    "- set_fill(color, opacity=val) is fine; but Mobject(opacity=val) is not.\n"
-    "- Keep minimum wait() calls per the length profile. Add self.wait(1) between sections if under budget."
-)
 
 
 def _load_int_env(name: str, default: int, minimum: int) -> int:
@@ -838,16 +809,32 @@ def _detect_mixed_point_dimension_expressions(tree: ast.AST) -> List[str]:
 
 
 def _detect_bare_opacity_kwarg(tree: ast.AST) -> List[str]:
-    """Detect `opacity=...` passed as a keyword argument to any constructor/call.
+    """Detect `opacity=...` passed as a keyword argument to constructors.
 
     ManimCE Mobjects do not accept a bare ``opacity`` kwarg.  The correct
     parameters are ``fill_opacity`` and ``stroke_opacity``, or calling
     ``.set_opacity()`` after creation.
+
+    We exempt method calls where ``opacity`` IS a valid keyword:
+      set_fill, set_stroke, set_style, set_opacity.
     """
+    _EXEMPT_METHODS = {"set_fill", "set_stroke", "set_style", "set_opacity"}
+
     errors: List[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
+
+        # Determine the method/function name being called
+        call_name: Optional[str] = None
+        if isinstance(node.func, ast.Attribute):
+            call_name = node.func.attr
+        elif isinstance(node.func, ast.Name):
+            call_name = node.func.id
+
+        if call_name in _EXEMPT_METHODS:
+            continue
+
         for kw in node.keywords:
             if kw.arg == "opacity":
                 errors.append(
@@ -991,6 +978,99 @@ def _detect_angle_misuse(tree: ast.AST) -> List[str]:
     return errors
 
 
+# Deprecated ManimCE API names → replacements
+_DEPRECATED_API_MAP = {
+    "ShowCreation": "Create",
+    "ShowDestruction": "Uncreate",
+    "ShowPassingFlashAround": "ShowPassingFlash",
+    "FadeInFromDown": "FadeIn(mob, shift=DOWN)",
+    "FadeOutAndShift": "FadeOut(mob, shift=direction)",
+    "GrowFromEdge": "GrowFromEdge",  # still exists but API changed
+    "ShowIncreasingSubsets": "ShowIncreasingSubsets",
+    "FadeInFrom": "FadeIn(mob, shift=direction)",
+    "FadeInFromLarge": "FadeIn(mob, scale=2)",
+    "FadeOutToPoint": "FadeOut(mob, target_position=point)",
+}
+
+
+def _detect_deprecated_apis(tree: ast.AST) -> List[str]:
+    """Detect usage of deprecated ManimCE animation/mobject names."""
+    # Only flag the ones that will actually crash at runtime
+    _HARD_DEPRECATED = {"ShowCreation", "ShowDestruction", "FadeInFromDown", "FadeOutAndShift",
+                        "FadeInFrom", "FadeInFromLarge", "FadeOutToPoint"}
+    errors: List[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func_name = _get_call_name(node.func)
+        if func_name in _HARD_DEPRECATED:
+            replacement = _DEPRECATED_API_MAP.get(func_name, "the modern equivalent")
+            errors.append(
+                f"Line {node.lineno}: '{func_name}' is deprecated in ManimCE; "
+                f"use {replacement} instead"
+            )
+    return errors
+
+
+def _detect_fstring_in_mathtex(tree: ast.AST) -> List[str]:
+    """Detect f-strings used as arguments to MathTex() or Tex().
+
+    f-strings containing backslashes (``\\frac``, ``\\pi``, etc.) will cause
+    a SyntaxError in Python 3.11 and below, and even in 3.12+ the backslashes
+    are often mangled.  The safe pattern is ``MathTex(r'...', ...)`` with
+    ``.set_color_by_tex`` or string concatenation for dynamic parts.
+    """
+    errors: List[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func_name = _get_call_name(node.func)
+        if func_name not in {"MathTex", "Tex"}:
+            continue
+        for arg in node.args:
+            if isinstance(arg, ast.JoinedStr):
+                errors.append(
+                    f"Line {node.lineno}: f-string in {func_name}() may break LaTeX backslashes; "
+                    "use raw strings (r'...') and .set_color_by_tex() or string concatenation"
+                )
+                break
+    return errors
+
+
+def _detect_3d_without_camera_setup(tree: ast.AST) -> List[str]:
+    """Detect ThreeDScene subclass that doesn't call set_camera_orientation().
+
+    Forgetting to set the camera before adding 3D content causes the default
+    top-down view which makes 3D objects appear flat/invisible.
+    """
+    errors: List[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef) or node.name != "GenScene":
+            continue
+
+        is_3d = any(
+            _get_call_name(base) == "ThreeDScene" for base in node.bases
+        )
+        if not is_3d:
+            continue
+
+        # Walk the class body looking for set_camera_orientation call
+        has_camera_setup = False
+        for child in ast.walk(node):
+            if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute):
+                if child.func.attr in ("set_camera_orientation", "move_camera"):
+                    has_camera_setup = True
+                    break
+
+        if not has_camera_setup:
+            errors.append(
+                "ThreeDScene missing set_camera_orientation() call; "
+                "3D objects will appear flat without proper camera setup"
+            )
+
+    return errors
+
+
 def _count_wait_calls(tree: ast.AST) -> int:
     count = 0
     for node in ast.walk(tree):
@@ -1038,6 +1118,9 @@ def validate_code(code: str, length: str) -> List[str]:
     errors.extend(_detect_math_in_text_mode(tree))
     errors.extend(_detect_2d_slices_in_constructors(tree))
     errors.extend(_detect_angle_misuse(tree))
+    errors.extend(_detect_deprecated_apis(tree))
+    errors.extend(_detect_fstring_in_mathtex(tree))
+    errors.extend(_detect_3d_without_camera_setup(tree))
 
     min_wait_calls = int(get_length_profile(length).get("minimum_wait_calls", 0))
     wait_calls = _count_wait_calls(tree)
@@ -1105,7 +1188,7 @@ async def repair_code_from_runtime_error(
     profile = get_length_profile(length)
     prompt_template = ChatPromptTemplate.from_messages(
         [
-            SystemMessage(content=RUNTIME_REPAIR_SYSTEM_PROMPT),
+            SystemMessage(content=PROMPT_ASSETS["runtime_repair_system"]),
             (
                 "human",
                 "User prompt:\n{prompt}\n\n"
@@ -1132,6 +1215,12 @@ async def repair_code_from_runtime_error(
     )
 
     repaired_code = sanitize_generated_code(raw_response)
+
+    # Apply the same mechanical auto-fixes used in the primary generation path
+    # so that recurring LLM mistakes (e.g. bare opacity=) are caught before
+    # validation rejects the repaired code.
+    repaired_code = _apply_all_auto_fixes(repaired_code, length)
+
     errors = validate_code(repaired_code, length)
     if errors:
         raise ValueError(
@@ -1211,14 +1300,94 @@ def _auto_pad_wait_calls(code: str, length: str) -> str:
 def _auto_fix_bare_opacity(code: str) -> str:
     """Replace bare `opacity=` keyword args with `fill_opacity=`.
 
-    This is a safe mechanical fix because ManimCE never accepts `opacity`
-    as a constructor kwarg – it always requires `fill_opacity` or
-    `stroke_opacity`.  Using `fill_opacity` is the correct default since
-    it controls the visible fill which is what users almost always intend.
+    ManimCE Mobjects do not accept a bare ``opacity`` kwarg in constructors.
+    The correct parameters are ``fill_opacity`` and ``stroke_opacity``, or
+    calling ``.set_opacity()`` after creation.
+
+    However, `opacity` IS a valid positional-keyword in these method calls:
+      - set_fill(color, opacity=val)
+      - set_stroke(color, width=..., opacity=val)
+      - set_style(..., fill_opacity / stroke_opacity / ... opacity=...)
+      - set_opacity(val)
+    So we must NOT rewrite those.
+
+    Strategy: process line-by-line; skip lines whose call context is an exempt
+    method, then apply the substitution on the remainder.
     """
     import re as _re
-    # Match `opacity=` that is NOT already prefixed with `fill_` or `stroke_`
-    return _re.sub(r'(?<!fill_)(?<!stroke_)\bopacity\s*=', 'fill_opacity=', code)
+
+    # Methods where `opacity=` is a legitimate keyword argument
+    _EXEMPT_METHODS = _re.compile(
+        r'\.\s*(?:set_fill|set_stroke|set_style|set_opacity)\s*\('
+    )
+
+    out_lines: list[str] = []
+    for line in code.split("\n"):
+        if _EXEMPT_METHODS.search(line):
+            # This line calls an exempt method — leave it untouched
+            out_lines.append(line)
+        else:
+            out_lines.append(
+                _re.sub(r'(?<!fill_)(?<!stroke_)\bopacity\s*=', 'fill_opacity=', line)
+            )
+    return "\n".join(out_lines)
+
+
+def _auto_fix_showcreation(code: str) -> str:
+    """Replace deprecated ``ShowCreation`` with ``Create``.
+
+    ``ShowCreation`` was renamed to ``Create`` in ManimCE 0.16.  The LLM
+    occasionally produces the old name because older tutorials still use it.
+    """
+    import re as _re
+    return _re.sub(r'\bShowCreation\b', 'Create', code)
+
+
+def _auto_fix_group_to_vgroup(code: str) -> str:
+    """Replace bare ``Group(`` with ``VGroup(`` when used for VMobjects.
+
+    In ManimCE, ``Group`` is for generic Mobjects and ``VGroup`` is for
+    VMobjects (shapes, text, graphs, etc.).  Passing VMobjects to ``Group``
+    instead of ``VGroup`` causes rendering issues.  Since virtually all
+    user-generated Manim code works with VMobjects, this swap is safe.
+    """
+    import re as _re
+    # Match standalone `Group(` that is NOT part of AnimationGroup, VGroup, etc.
+    return _re.sub(
+        r'(?<!Animation)(?<!V)(?<!Sub)\bGroup\s*\(',
+        'VGroup(',
+        code,
+    )
+
+
+def _auto_fix_2d_numpy_arrays(code: str) -> str:
+    """Replace ``np.array([x, y])`` with ``np.array([x, y, 0])`` in common patterns.
+
+    Manim requires 3D coordinate arrays.  When the LLM produces 2-element
+    arrays they crash with broadcast shape errors.  This fix targets the
+    most common pattern: ``np.array([<expr>, <expr>])`` without a third element.
+    """
+    import re as _re
+    # Match np.array([...]) with exactly 2 comma-separated items (no nested brackets)
+    return _re.sub(
+        r'np\.array\(\[\s*([^,\[\]]+),\s*([^,\[\]]+)\s*\]\)',
+        r'np.array([\1, \2, 0])',
+        code,
+    )
+
+
+def _apply_all_auto_fixes(code: str, length: str) -> str:
+    """Apply every mechanical auto-fix in sequence, then pad wait calls if needed.
+
+    This is the single entry-point called from both the primary generation
+    pipeline and the runtime repair path.
+    """
+    code = _auto_fix_bare_opacity(code)
+    code = _auto_fix_showcreation(code)
+    code = _auto_fix_group_to_vgroup(code)
+    code = _auto_fix_2d_numpy_arrays(code)
+    code = _auto_pad_wait_calls(code, length)
+    return code
 
 
 async def generate_manim_code(
@@ -1250,17 +1419,9 @@ async def generate_manim_code(
         errors = validate_code(code, length)
 
     if errors:
-        # Last-resort auto-fixes for mechanically-correctable issues
-        has_opacity = any("'opacity' is not a valid" in e for e in errors)
-        if has_opacity:
-            code = _auto_fix_bare_opacity(code)
-            errors = validate_code(code, length)
-
-    if errors:
-        pacing_only = all("Insufficient pacing" in e for e in errors)
-        if pacing_only:
-            code = _auto_pad_wait_calls(code, length)
-            errors = validate_code(code, length)
+        # Last-resort: apply all mechanical auto-fixes
+        code = _apply_all_auto_fixes(code, length)
+        errors = validate_code(code, length)
 
     if errors:
         raise ValueError(

@@ -110,7 +110,7 @@ def process_video_generation(
         )
         
         from .manim_service import execute_manim_code
-        max_render_repairs_raw = os.environ.get("MANIM_RENDER_REPAIR_ATTEMPTS", "1")
+        max_render_repairs_raw = os.environ.get("MANIM_RENDER_REPAIR_ATTEMPTS", "2")
         try:
             max_render_repairs = max(0, int(max_render_repairs_raw))
         except ValueError:

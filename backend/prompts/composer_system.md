@@ -75,7 +75,8 @@ Equation Work:
   - Multi-string MathTex for isolating colored parts
   - Step-by-step derivation with TransformMatchingTex
   - TransformFromCopy to keep original while showing derivation
-  - Brace + brace.get_text() for labeling parts
+  - Brace + brace.get_tex(r"math") for math labels (NEVER get_text for math!)
+  - Brace + brace.get_text("plain text") for non-math labels only
 
 Geometry & Graphing:
   - NumberPlane / Axes with axis labels
