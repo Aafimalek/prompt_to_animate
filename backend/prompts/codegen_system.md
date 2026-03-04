@@ -90,7 +90,7 @@ Coordinate Systems:
   NumberPlane(x_range=[-7,7], y_range=[-4,4],
               background_line_style={"stroke_opacity": 0.5})
   axes.plot(lambda x: x**2, color=BLUE)
-  axes.get_area(graph, x_range=[0,2], color=BLUE, opacity=0.3)
+  axes.get_area(graph, x_range=[0,2], color=BLUE, fill_opacity=0.3)
   axes.get_graph_label(graph, label=MathTex(r"y=x^2"), x_val=2)
   axes.c2p(x, y)  — convert coordinates to screen point
 

@@ -15,18 +15,18 @@ from langchain_core.messages import SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
-from langchain_openai import AzureChatOpenAI, ChatOpenAI
+from langchain_openai import ChatOpenAI
 import openai as openai_mod
 
 # Load .env from project root
 env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
-# Azure OpenAI (primary)
+# Azure OpenAI (primary) – uses the v1 API (no api-version needed)
 azure_openai_api_key = os.environ.get("AZURE_OPENAI_API_KEY", "").strip()
 azure_openai_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "").strip()
 azure_openai_deployment = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-5.2-chat").strip()
-azure_openai_api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview").strip()
+azure_openai_base_url = f"{azure_openai_endpoint.rstrip('/')}/openai/v1" if azure_openai_endpoint else ""
 if not azure_openai_api_key or not azure_openai_endpoint:
     print(f"Warning: AZURE_OPENAI_API_KEY or AZURE_OPENAI_ENDPOINT not found in environment. Checked path: {env_path}")
 
@@ -201,12 +201,11 @@ else:
 def _get_llm_client(provider: str, model_name: str):
     """Return a LangChain chat model for the given provider."""
     if provider == "azure":
-        return AzureChatOpenAI(
-            azure_deployment=model_name,
-            azure_endpoint=azure_openai_endpoint,
+        return ChatOpenAI(
+            model=model_name,
             api_key=azure_openai_api_key,
-            api_version=azure_openai_api_version,
-            max_tokens=16384,
+            base_url=azure_openai_base_url,
+            max_completion_tokens=16384,
         )
     if provider == "cerebras":
         return ChatOpenAI(
@@ -1209,6 +1208,19 @@ def _auto_pad_wait_calls(code: str, length: str) -> str:
     return "\n".join(lines)
 
 
+def _auto_fix_bare_opacity(code: str) -> str:
+    """Replace bare `opacity=` keyword args with `fill_opacity=`.
+
+    This is a safe mechanical fix because ManimCE never accepts `opacity`
+    as a constructor kwarg – it always requires `fill_opacity` or
+    `stroke_opacity`.  Using `fill_opacity` is the correct default since
+    it controls the visible fill which is what users almost always intend.
+    """
+    import re as _re
+    # Match `opacity=` that is NOT already prefixed with `fill_` or `stroke_`
+    return _re.sub(r'(?<!fill_)(?<!stroke_)\bopacity\s*=', 'fill_opacity=', code)
+
+
 async def generate_manim_code(
     prompt: str,
     length: str,
@@ -1238,7 +1250,13 @@ async def generate_manim_code(
         errors = validate_code(code, length)
 
     if errors:
-        # Last-resort: auto-pad wait() calls if that's the only remaining issue
+        # Last-resort auto-fixes for mechanically-correctable issues
+        has_opacity = any("'opacity' is not a valid" in e for e in errors)
+        if has_opacity:
+            code = _auto_fix_bare_opacity(code)
+            errors = validate_code(code, length)
+
+    if errors:
         pacing_only = all("Insufficient pacing" in e for e in errors)
         if pacing_only:
             code = _auto_pad_wait_calls(code, length)
