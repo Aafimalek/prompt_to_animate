@@ -30,3 +30,4 @@ rq>=1.16.0
 # Additional utilities
 numpy>=1.24.0
 setuptools<81
+PyJWT[crypto]>=2.8.0

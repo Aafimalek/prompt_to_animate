@@ -103,3 +103,8 @@ def get_result_key(job_id: str) -> str:
     """Get the Redis key for job result."""
     return f"job:{job_id}:result"
 
+
+def get_owner_key(job_id: str) -> str:
+    """Get the Redis key storing owner clerk_id for a job."""
+    return f"job:{job_id}:owner"
+

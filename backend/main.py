@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,14 +14,30 @@ import asyncio
 import uvicorn
 
 # Redis and job queue
-from .redis_utils import get_redis_connection, get_queue, get_progress_key, get_result_key
+from .redis_utils import (
+    get_redis_connection,
+    get_queue,
+    get_progress_key,
+    get_result_key,
+    get_owner_key,
+)
 from .tasks import process_video_generation
+from .auth import (
+    ClerkAuthMiddleware,
+    ensure_clerk_path_access,
+    resolve_authenticated_clerk_id,
+)
 
 # Keep these for non-worker endpoints
 from .s3_service import generate_cloudfront_signed_url
 from .database import connect_to_mongo, close_mongo_connection, get_chats_collection
 from .models import ChatResponse, ChatListResponse
-from .user_service import check_can_generate, get_user_usage, add_basic_credits, set_pro_subscription
+from .user_service import (
+    check_can_generate_with_constraints,
+    get_user_usage,
+    add_basic_credits,
+    set_pro_subscription,
+)
 from .export_service import build_interactive_manifest, build_manim_slides_outline
 from .scene_memory import record_quality_feedback, retrieve_scene_memories
 from .voiceover_service import script_to_voiceover_metadata
@@ -52,9 +68,36 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Prompt to Animate API", lifespan=lifespan)
 
+app.add_middleware(ClerkAuthMiddleware)
+
+
+def _csv_env(name: str, default: list[str]) -> list[str]:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _int_env(name: str, default: int, minimum: int = 1) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return max(minimum, default)
+    try:
+        return max(minimum, int(raw))
+    except ValueError:
+        return max(minimum, default)
+
+
+cors_allowed_origins = _csv_env(
+    "CORS_ALLOWED_ORIGINS",
+    ["https://www.manimancer.fun", "http://localhost:3000"],
+)
+cors_allow_origin_regex = os.getenv("CORS_ALLOW_ORIGIN_REGEX", "").strip() or None
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all for dev
+    allow_origins=cors_allowed_origins,
+    allow_origin_regex=cors_allow_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -144,7 +187,7 @@ def should_emit_progress(
 
 
 @app.post("/generate", response_model=AnimationResponse)
-async def generate_animation(request: AnimationRequest):
+async def generate_animation(request: AnimationRequest, http_request: Request):
     """
     Original endpoint - kept for backward compatibility.
     Uses the job queue for consistency with the async architecture.
@@ -152,6 +195,16 @@ async def generate_animation(request: AnimationRequest):
     print(f"Received request: {request}")
     
     try:
+        clerk_id = resolve_authenticated_clerk_id(http_request, request.clerk_id)
+
+        usage_check = await check_can_generate_with_constraints(
+            clerk_id=clerk_id,
+            resolution=request.resolution,
+            length=request.length,
+        )
+        if not usage_check["allowed"]:
+            raise HTTPException(status_code=403, detail=usage_check["reason"])
+
         # Get Redis connection and queue
         redis_conn = get_redis_connection()
         queue = get_queue()
@@ -165,7 +218,7 @@ async def generate_animation(request: AnimationRequest):
             args=(
                 request.prompt,
                 request.length,
-                request.clerk_id or "anonymous",
+                clerk_id,
                 job_id,
                 request.resolution,
             ),
@@ -174,6 +227,9 @@ async def generate_animation(request: AnimationRequest):
             result_ttl=3600,
             failure_ttl=3600
         )
+
+        job_owner_ttl = _int_env("JOB_OWNER_TTL_SECONDS", 3600, minimum=600)
+        redis_conn.set(get_owner_key(job_id), clerk_id, ex=job_owner_ttl)
         
         print(f"📤 Enqueued job {job_id}")
         
@@ -212,7 +268,7 @@ async def generate_animation(request: AnimationRequest):
 
 
 @app.post("/generate-stream")
-async def generate_animation_stream(request: AnimationRequest):
+async def generate_animation_stream(request: AnimationRequest, http_request: Request):
     """
     Streaming endpoint that sends progress updates as Server-Sent Events.
     
@@ -220,14 +276,9 @@ async def generate_animation_stream(request: AnimationRequest):
     for progress updates, streaming them to the frontend. The actual
     work is done by an RQ worker running in a separate process/container.
     
-    Requires authentication - clerk_id must be provided.
+    Requires authentication via Clerk bearer token.
     """
-    # Authentication check - require clerk_id
-    if not request.clerk_id:
-        raise HTTPException(
-            status_code=401, 
-            detail="Authentication required. Please sign in to generate videos."
-        )
+    clerk_id = resolve_authenticated_clerk_id(http_request, request.clerk_id)
     
     async def event_generator():
         redis_conn = None
@@ -235,7 +286,11 @@ async def generate_animation_stream(request: AnimationRequest):
         
         try:
             # Step 0: Check usage limits
-            usage_check = await check_can_generate(request.clerk_id)
+            usage_check = await check_can_generate_with_constraints(
+                clerk_id=clerk_id,
+                resolution=request.resolution,
+                length=request.length,
+            )
             if not usage_check["allowed"]:
                 yield f"data: {json.dumps({'step': -1, 'status': 'error', 'message': usage_check['reason']})}\n\n"
                 return
@@ -253,7 +308,7 @@ async def generate_animation_stream(request: AnimationRequest):
                 args=(
                     request.prompt,
                     request.length,
-                    request.clerk_id,
+                    clerk_id,
                     job_id,
                     request.resolution,
                 ),
@@ -262,8 +317,11 @@ async def generate_animation_stream(request: AnimationRequest):
                 result_ttl=3600,  # Keep result for 1 hour
                 failure_ttl=3600  # Keep failed job info for 1 hour
             )
+
+            job_owner_ttl = _int_env("JOB_OWNER_TTL_SECONDS", 3600, minimum=600)
+            redis_conn.set(get_owner_key(job_id), clerk_id, ex=job_owner_ttl)
             
-            print(f"📤 Enqueued job {job_id} for user {request.clerk_id}")
+            print(f"📤 Enqueued job {job_id} for user {clerk_id}")
             
             # Poll for progress updates
             last_signature: Optional[Tuple[int, str, str]] = None
@@ -324,13 +382,20 @@ async def generate_animation_stream(request: AnimationRequest):
 # ============== Job Status Endpoint ==============
 
 @app.get("/job/{job_id}/status")
-async def get_job_status(job_id: str):
+async def get_job_status(job_id: str, request: Request):
     """
     Get the current status of a video generation job.
     Useful for polling the job status directly without SSE.
     """
     try:
         redis_conn = get_redis_connection()
+
+        caller_clerk_id = resolve_authenticated_clerk_id(request, None)
+        owner_clerk_id = redis_conn.get(get_owner_key(job_id))
+        if not owner_clerk_id:
+            raise HTTPException(status_code=404, detail="Job not found")
+        if owner_clerk_id != caller_clerk_id:
+            raise HTTPException(status_code=403, detail="Forbidden: job does not belong to user")
         
         # Check for progress
         progress_data = redis_conn.get(get_progress_key(job_id))
@@ -383,12 +448,13 @@ async def health_check():
 # ============== Chat History Endpoints ==============
 
 @app.get("/chats/{clerk_id}", response_model=ChatListResponse)
-async def get_user_chats(clerk_id: str):
+async def get_user_chats(clerk_id: str, request: Request):
     """
     Get all chats for a specific user by their Clerk ID.
     Returns chats sorted by creation date (newest first).
     """
     try:
+        ensure_clerk_path_access(request, clerk_id)
         chats_collection = await get_chats_collection()
         cursor = chats_collection.find({"clerk_id": clerk_id}).sort("created_at", -1)
         chats = await cursor.to_list(length=100)  # Limit to 100 chats
@@ -421,11 +487,12 @@ async def get_user_chats(clerk_id: str):
 
 
 @app.get("/chats/{clerk_id}/{chat_id}", response_model=ChatResponse)
-async def get_chat_detail(clerk_id: str, chat_id: str):
+async def get_chat_detail(clerk_id: str, chat_id: str, request: Request):
     """
     Get a specific chat by ID with a fresh signed URL.
     """
     try:
+        ensure_clerk_path_access(request, clerk_id)
         chats_collection = await get_chats_collection()
         chat = await chats_collection.find_one({
             "_id": ObjectId(chat_id),
@@ -460,12 +527,13 @@ async def get_chat_detail(clerk_id: str, chat_id: str):
 
 
 @app.delete("/chats/{clerk_id}/{chat_id}")
-async def delete_chat(clerk_id: str, chat_id: str):
+async def delete_chat(clerk_id: str, chat_id: str, request: Request):
     """
     Delete a specific chat.
     Only the owner (matching clerk_id) can delete their chat.
     """
     try:
+        ensure_clerk_path_access(request, clerk_id)
         chats_collection = await get_chats_collection()
         result = await chats_collection.delete_one({
             "_id": ObjectId(chat_id),
@@ -487,9 +555,10 @@ async def delete_chat(clerk_id: str, chat_id: str):
 # ============== Usage & Credits Endpoints ==============
 
 @app.get("/usage/{clerk_id}")
-async def get_usage(clerk_id: str):
+async def get_usage(clerk_id: str, request: Request):
     """Get user's current usage and tier info."""
     try:
+        ensure_clerk_path_access(request, clerk_id)
         usage = await get_user_usage(clerk_id)
         return usage
     except Exception as e:
@@ -578,12 +647,13 @@ async def search_scene_memory(prompt: str, top_k: int = 3):
 
 
 @app.post("/feedback/quality")
-async def submit_quality_feedback(payload: QualityFeedbackRequest):
+async def submit_quality_feedback(payload: QualityFeedbackRequest, request: Request):
     """Submit user quality feedback to improve candidate reranking."""
     try:
+        clerk_id = resolve_authenticated_clerk_id(request, payload.clerk_id)
         feedback_id = await record_quality_feedback(
             chat_id=payload.chat_id,
-            clerk_id=payload.clerk_id,
+            clerk_id=clerk_id,
             rating=payload.rating,
             note=payload.note,
         )
@@ -603,8 +673,9 @@ async def retrain_quality_reward_model(payload: RewardRetrainRequest):
 
 
 @app.post("/chats/{clerk_id}/{chat_id}/comments")
-async def create_comment(clerk_id: str, chat_id: str, payload: ChatCommentRequest):
+async def create_comment(clerk_id: str, chat_id: str, payload: ChatCommentRequest, request: Request):
     try:
+        ensure_clerk_path_access(request, clerk_id)
         comment_id = await add_chat_comment(
             chat_id=chat_id,
             clerk_id=clerk_id,
@@ -617,8 +688,9 @@ async def create_comment(clerk_id: str, chat_id: str, payload: ChatCommentReques
 
 
 @app.get("/chats/{clerk_id}/{chat_id}/comments")
-async def get_comments(clerk_id: str, chat_id: str):
+async def get_comments(clerk_id: str, chat_id: str, request: Request):
     try:
+        ensure_clerk_path_access(request, clerk_id)
         comments = await list_chat_comments(chat_id=chat_id)
         return {"status": "ok", "comments": comments}
     except Exception as e:
@@ -626,8 +698,9 @@ async def get_comments(clerk_id: str, chat_id: str):
 
 
 @app.post("/chats/{clerk_id}/{chat_id}/variants")
-async def create_variant(clerk_id: str, chat_id: str, payload: ChatVariantRequest):
+async def create_variant(clerk_id: str, chat_id: str, payload: ChatVariantRequest, request: Request):
     try:
+        ensure_clerk_path_access(request, clerk_id)
         variant_id = await create_ab_variant(
             chat_id=chat_id,
             clerk_id=clerk_id,
@@ -642,8 +715,9 @@ async def create_variant(clerk_id: str, chat_id: str, payload: ChatVariantReques
 
 
 @app.get("/chats/{clerk_id}/{chat_id}/variants")
-async def get_variants(clerk_id: str, chat_id: str):
+async def get_variants(clerk_id: str, chat_id: str, request: Request):
     try:
+        ensure_clerk_path_access(request, clerk_id)
         variants = await list_ab_variants(chat_id=chat_id, clerk_id=clerk_id)
         return {"status": "ok", "variants": variants}
     except Exception as e:
@@ -651,8 +725,9 @@ async def get_variants(clerk_id: str, chat_id: str):
 
 
 @app.post("/chats/{clerk_id}/{chat_id}/branches")
-async def create_chat_branch(clerk_id: str, chat_id: str, payload: BranchRequest):
+async def create_chat_branch(clerk_id: str, chat_id: str, payload: BranchRequest, request: Request):
     try:
+        ensure_clerk_path_access(request, clerk_id)
         branch_id = await create_branch(
             chat_id=chat_id,
             clerk_id=clerk_id,
@@ -665,8 +740,9 @@ async def create_chat_branch(clerk_id: str, chat_id: str, payload: BranchRequest
 
 
 @app.get("/chats/{clerk_id}/{chat_id}/branches")
-async def get_chat_branches(clerk_id: str, chat_id: str):
+async def get_chat_branches(clerk_id: str, chat_id: str, request: Request):
     try:
+        ensure_clerk_path_access(request, clerk_id)
         branches = await list_branches(chat_id=chat_id, clerk_id=clerk_id)
         return {"status": "ok", "branches": branches}
     except Exception as e:
@@ -679,8 +755,10 @@ async def merge_chat_branch(
     chat_id: str,
     branch_id: str,
     payload: MergeBranchRequest,
+    request: Request,
 ):
     try:
+        ensure_clerk_path_access(request, clerk_id)
         result = await merge_branch_into_chat(
             chat_id=chat_id,
             clerk_id=clerk_id,
@@ -693,8 +771,9 @@ async def merge_chat_branch(
 
 
 @app.get("/chats/{clerk_id}/{chat_id}/variants/{variant_id}/diff")
-async def get_variant_diff(clerk_id: str, chat_id: str, variant_id: str):
+async def get_variant_diff(clerk_id: str, chat_id: str, variant_id: str, request: Request):
     try:
+        ensure_clerk_path_access(request, clerk_id)
         base_code = await get_chat_code(chat_id=chat_id, clerk_id=clerk_id)
         variant_code = await get_variant_code(chat_id=chat_id, variant_id=variant_id, clerk_id=clerk_id)
         diff_text = code_diff(base_code, variant_code)

@@ -8,7 +8,7 @@ Tiers:
 """
 
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import Dict, Any, Optional
 from .database import get_database
 
 
@@ -41,6 +41,14 @@ TIERS = {
         "quality": "4k60"
     }
 }
+
+# Length ordering used for server-side entitlement checks
+LENGTH_ORDER = [
+    "Medium (15s)",
+    "Long (1m)",
+    "Deep Dive (2m)",
+    "Extended (5m)",
+]
 
 
 async def get_users_collection():
@@ -118,57 +126,137 @@ async def check_can_generate(clerk_id: str) -> Dict[str, Any]:
     Check if user can generate a video.
     Returns: {"allowed": bool, "reason": str, "remaining": int, "tier": str}
     """
+    return await check_can_generate_with_constraints(clerk_id)
+
+
+def _length_rank(length: Optional[str]) -> int:
+    if not length:
+        return LENGTH_ORDER.index("Medium (15s)")
+    try:
+        return LENGTH_ORDER.index(length)
+    except ValueError:
+        # Unknown length labels are treated as most permissive by default;
+        # callers should pass known labels.
+        return len(LENGTH_ORDER) - 1
+
+
+def _is_length_allowed(requested_length: Optional[str], max_length: str) -> bool:
+    return _length_rank(requested_length) <= _length_rank(max_length)
+
+
+async def check_can_generate_with_constraints(
+    clerk_id: str,
+    resolution: str = "720p",
+    length: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Check generation eligibility with server-side entitlement checks.
+
+    Enforces:
+    - monthly limits
+    - available purchased credits
+    - allowed resolution by entitlement
+    - max length by entitlement
+    """
     user = await get_or_create_user(clerk_id)
     user = await check_and_reset_monthly(user)
-    
+
     tier = user.get("tier", "free")
-    monthly_count = user.get("monthly_count", 0)
-    basic_credits = user.get("basic_credits", 0)
-    
-    # Pro users: 50 videos/month
+    monthly_count = int(user.get("monthly_count", 0))
+    basic_credits = float(user.get("basic_credits", 0))
+
+    # Pro users
     if tier == "pro":
-        limit = TIERS["pro"]["monthly_limit"]
-        remaining = limit - monthly_count
+        limit = int(TIERS["pro"]["monthly_limit"])
+        remaining = max(0, limit - monthly_count)
+        if resolution not in TIERS["pro"]["allowed_resolutions"]:
+            return {
+                "allowed": False,
+                "reason": f"Resolution {resolution} is not allowed for Pro tier.",
+                "remaining": remaining,
+                "tier": "pro",
+            }
+        if not _is_length_allowed(length, TIERS["pro"]["max_length"]):
+            return {
+                "allowed": False,
+                "reason": f"Selected length is too long for Pro tier (max: {TIERS['pro']['max_length']}).",
+                "remaining": remaining,
+                "tier": "pro",
+            }
         if monthly_count >= limit:
             return {
                 "allowed": False,
                 "reason": f"Pro monthly limit reached (50 videos). Resets on {user['month_reset_date'].strftime('%B 1')}.",
                 "remaining": 0,
-                "tier": "pro"
+                "tier": "pro",
             }
         return {
             "allowed": True,
             "reason": "Pro user",
             "remaining": remaining,
-            "tier": "pro"
+            "tier": "pro",
         }
-    
-    # Check if user has basic credits (one-time purchase)
+
+    # Basic credits entitlement (free user who purchased pack)
     if basic_credits > 0:
+        if resolution not in TIERS["basic"]["allowed_resolutions"]:
+            return {
+                "allowed": False,
+                "reason": f"Resolution {resolution} is not allowed with Basic credits.",
+                "remaining": int(basic_credits),
+                "tier": "basic",
+            }
+        if not _is_length_allowed(length, TIERS["basic"]["max_length"]):
+            return {
+                "allowed": False,
+                "reason": f"Selected length is too long for Basic credits (max: {TIERS['basic']['max_length']}).",
+                "remaining": int(basic_credits),
+                "tier": "basic",
+            }
+        cost = RESOLUTION_COSTS.get(resolution, 1.0)
+        if basic_credits < cost:
+            return {
+                "allowed": False,
+                "reason": f"Not enough credits for {resolution}. Needed {cost}, available {basic_credits}.",
+                "remaining": int(basic_credits),
+                "tier": "basic",
+            }
         return {
             "allowed": True,
             "reason": "Using Basic credits",
-            "remaining": basic_credits,
-            "tier": "basic"
+            "remaining": int(basic_credits),
+            "tier": "basic",
         }
-    
-    # Free tier: 5 videos/month
-    limit = TIERS["free"]["monthly_limit"]
-    remaining = limit - monthly_count
-    
+
+    # Free tier enforcement
+    limit = int(TIERS["free"]["monthly_limit"])
+    remaining = max(0, limit - monthly_count)
+    if resolution not in TIERS["free"]["allowed_resolutions"]:
+        return {
+            "allowed": False,
+            "reason": "Free tier supports 720p only. Upgrade to unlock higher resolutions.",
+            "remaining": remaining,
+            "tier": "free",
+        }
+    if not _is_length_allowed(length, TIERS["free"]["max_length"]):
+        return {
+            "allowed": False,
+            "reason": f"Free tier max length is {TIERS['free']['max_length']}. Upgrade to unlock longer videos.",
+            "remaining": remaining,
+            "tier": "free",
+        }
     if monthly_count >= limit:
         return {
             "allowed": False,
             "reason": f"Free tier limit reached (5 videos/month). Upgrade to continue or wait until {user['month_reset_date'].strftime('%B 1')}.",
             "remaining": 0,
-            "tier": "free"
+            "tier": "free",
         }
-    
     return {
         "allowed": True,
         "reason": "Free tier",
         "remaining": remaining,
-        "tier": "free"
+        "tier": "free",
     }
 
 

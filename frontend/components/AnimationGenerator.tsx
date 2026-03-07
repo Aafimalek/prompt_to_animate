@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Wand2, ChevronDown, Download, Loader2, Code, Share2, Check, Sparkles, Film, LogIn, Crown, Zap, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { HistoryItem } from './Sidebar';
-import { useUser, SignInButton } from '@clerk/nextjs';
+import { useUser, useAuth, useClerk, SignInButton } from '@clerk/nextjs';
 import { API_BASE_URL } from '@/lib/api';
 
 interface AnimationGeneratorProps {
@@ -48,6 +48,8 @@ const RESOLUTIONS = [
 
 export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeClick, usageRefreshTrigger }: AnimationGeneratorProps) {
     const { user, isSignedIn } = useUser();
+    const { getToken } = useAuth();
+    const { openSignIn } = useClerk();
     const [prompt, setPrompt] = useState('');
     const [length, setLength] = useState('Medium (15s)');
     const [resolution, setResolution] = useState('720p');
@@ -61,10 +63,18 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
     const [usage, setUsage] = useState<UsageInfo | null>(null);
 
     // Fetch usage on mount and after generation
-    const fetchUsage = async () => {
+    const fetchUsage = useCallback(async () => {
         if (user?.id) {
             try {
-                const response = await fetch(`${API_BASE_URL}/usage/${user.id}`);
+                const token = await getToken();
+                if (!token) {
+                    return;
+                }
+                const response = await fetch(`${API_BASE_URL}/usage/${user.id}`, {
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                });
                 if (response.ok) {
                     const data = await response.json();
                     setUsage(data);
@@ -73,11 +83,11 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
                 console.error('Failed to fetch usage:', error);
             }
         }
-    };
+    }, [user?.id, getToken]);
 
     useEffect(() => {
         fetchUsage();
-    }, [user?.id, usageRefreshTrigger]);
+    }, [fetchUsage, usageRefreshTrigger]);
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -120,6 +130,12 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
 
     const handleGenerate = async () => {
         if (!prompt.trim()) return;
+        if (!isSignedIn) {
+            setError('Please sign in or create an account to generate videos.');
+            openSignIn({ afterSignInUrl: '/', afterSignUpUrl: '/' });
+            return;
+        }
+
         setLoading(true);
         setVideoUrl(null);
         setError(null);
@@ -127,16 +143,21 @@ export function AnimationGenerator({ initialData, onGenerateComplete, onUpgradeC
         setCurrentProgress(null);
 
         try {
+            const token = await getToken();
+            if (!token) {
+                throw new Error('Please sign in to generate videos');
+            }
+
             const response = await fetch(`${API_BASE_URL}/generate-stream`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({
                     prompt,
                     length,
                     resolution,
-                    clerk_id: isSignedIn ? user?.id : undefined,
                 }),
             });
 

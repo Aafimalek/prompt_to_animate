@@ -20,12 +20,19 @@ export interface ChatListResponse {
     total: number;
 }
 
+function authHeaders(token?: string): HeadersInit {
+    if (!token) return {};
+    return { Authorization: `Bearer ${token}` };
+}
+
 /**
  * Fetch all chats for a specific user
  */
-export async function getUserChats(clerkId: string): Promise<Chat[]> {
+export async function getUserChats(clerkId: string, token?: string): Promise<Chat[]> {
     try {
-        const response = await fetch(`${API_BASE_URL}/chats/${clerkId}`);
+        const response = await fetch(`${API_BASE_URL}/chats/${clerkId}`, {
+            headers: authHeaders(token),
+        });
 
         if (!response.ok) {
             console.error(`Failed to fetch chats: ${response.statusText}`);
@@ -44,9 +51,11 @@ export async function getUserChats(clerkId: string): Promise<Chat[]> {
 /**
  * Get a specific chat with a fresh signed URL
  */
-export async function getChatDetail(clerkId: string, chatId: string): Promise<Chat> {
+export async function getChatDetail(clerkId: string, chatId: string, token?: string): Promise<Chat> {
     try {
-        const response = await fetch(`${API_BASE_URL}/chats/${clerkId}/${chatId}`);
+        const response = await fetch(`${API_BASE_URL}/chats/${clerkId}/${chatId}`, {
+            headers: authHeaders(token),
+        });
 
         if (!response.ok) {
             throw new Error(`Failed to fetch chat: ${response.statusText}`);
@@ -62,10 +71,11 @@ export async function getChatDetail(clerkId: string, chatId: string): Promise<Ch
 /**
  * Delete a specific chat
  */
-export async function deleteChat(clerkId: string, chatId: string): Promise<void> {
+export async function deleteChat(clerkId: string, chatId: string, token?: string): Promise<void> {
     try {
         const response = await fetch(`${API_BASE_URL}/chats/${clerkId}/${chatId}`, {
             method: 'DELETE',
+            headers: authHeaders(token),
         });
 
         if (!response.ok) {

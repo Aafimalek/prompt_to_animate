@@ -9,12 +9,13 @@ import { AnimationGenerator } from '@/components/AnimationGenerator';
 import { PricingModal } from '@/components/PricingModal';
 import { AdSense } from '@/components/AdSense';
 import { cn } from '@/lib/utils';
-import { useUser } from '@clerk/nextjs';
+import { useUser, useAuth } from '@clerk/nextjs';
 import { getUserChats, deleteChat, Chat, API_BASE_URL } from '@/lib/api';
 
 // Wrapper component to handle Suspense boundary for useSearchParams
 function HomeContent() {
   const { user, isSignedIn, isLoaded } = useUser();
+  const { getToken } = useAuth();
   const searchParams = useSearchParams();
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [currentChat, setCurrentChat] = useState<HistoryItem | null>(null);
@@ -33,7 +34,13 @@ function HomeContent() {
     const fetchUserTier = async () => {
       if (isSignedIn && user?.id) {
         try {
-          const response = await fetch(`${API_BASE_URL}/usage/${user.id}`);
+          const token = await getToken();
+          if (!token) return;
+          const response = await fetch(`${API_BASE_URL}/usage/${user.id}`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
           if (response.ok) {
             const data = await response.json();
             setUserTier(data.tier || 'free');
@@ -45,7 +52,7 @@ function HomeContent() {
       }
     };
     fetchUserTier();
-  }, [isSignedIn, user?.id, usageRefreshTrigger]);
+  }, [isSignedIn, user?.id, usageRefreshTrigger, getToken]);
 
   // Handle payment success from URL params
   useEffect(() => {
@@ -105,7 +112,11 @@ function HomeContent() {
 
     setIsLoadingHistory(true);
     try {
-      const chats = await getUserChats(user.id);
+      const token = await getToken();
+      if (!token) {
+        throw new Error('Missing auth token');
+      }
+      const chats = await getUserChats(user.id, token);
       setHistory(chats.map(chatToHistoryItem));
     } catch (error) {
       console.error('Failed to fetch history:', error);
@@ -121,7 +132,7 @@ function HomeContent() {
     } finally {
       setIsLoadingHistory(false);
     }
-  }, [isSignedIn, user?.id]);
+  }, [isSignedIn, user?.id, getToken]);
 
   // Load history on mount and when auth state changes
   useEffect(() => {
@@ -159,7 +170,11 @@ function HomeContent() {
     // Delete from MongoDB if authenticated
     if (isSignedIn && user?.id) {
       try {
-        await deleteChat(user.id, id);
+        const token = await getToken();
+        if (!token) {
+          throw new Error('Missing auth token');
+        }
+        await deleteChat(user.id, id, token);
       } catch (error) {
         console.error('Failed to delete chat:', error);
         // Continue with local deletion even if API fails

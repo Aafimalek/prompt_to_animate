@@ -87,6 +87,22 @@ def process_video_generation(
     redis_conn = get_redis_connection()
     
     try:
+        # Re-check entitlements in worker to avoid running expensive jobs
+        # that were queued earlier but are no longer allowed.
+        from .user_service import check_can_generate_with_constraints
+
+        usage_check = _run_async(
+            check_can_generate_with_constraints(
+                clerk_id=clerk_id,
+                resolution=resolution,
+                length=length,
+            )
+        )
+        if not usage_check.get("allowed", False):
+            denial = str(usage_check.get("reason", "Generation not allowed"))
+            report_progress(redis_conn, job_id, -1, "error", denial)
+            return {"step": -1, "status": "error", "message": denial}
+
         # Step 1: Analyzing prompt
         report_progress(redis_conn, job_id, 1, "analyzing", "Analyzing your prompt...")
         
