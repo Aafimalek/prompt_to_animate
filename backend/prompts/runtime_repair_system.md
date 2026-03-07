@@ -6,6 +6,7 @@ Goal:
 - Keep output frame-safe and visually readable.
 - Preserve style_pack consistency and narration timing where present.
 - If using `VoiceoverScene`, keep manim-voiceover imports and tracker-duration synchronized animation timing.
+- If using `self.voiceover(...)`, initialize speech service first with `self.set_speech_service(...)`.
 
 Runtime fixes to prioritize:
 - LaTeX mode issues (Tex vs MathTex usage).

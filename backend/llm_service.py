@@ -865,6 +865,59 @@ def _has_voiceover_import(tree: ast.AST) -> bool:
     return False
 
 
+def _get_genscene_node(tree: ast.AST) -> Optional[ast.ClassDef]:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == "GenScene":
+            return node
+    return None
+
+
+def _genscene_uses_voiceover(tree: ast.AST) -> bool:
+    class_node = _get_genscene_node(tree)
+    if class_node is None:
+        return False
+
+    for base in class_node.bases:
+        if _get_call_name(base) == "VoiceoverScene":
+            return True
+
+    for node in ast.walk(class_node):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr == "voiceover":
+            return True
+    return False
+
+
+def _genscene_has_voiceover_init(tree: ast.AST) -> bool:
+    class_node = _get_genscene_node(tree)
+    if class_node is None:
+        return False
+
+    for node in ast.walk(class_node):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr != "set_speech_service":
+            continue
+        if isinstance(node.func.value, ast.Name) and node.func.value.id == "self":
+            return True
+    return False
+
+
+def _genscene_defines_voiceover_method(tree: ast.AST) -> bool:
+    class_node = _get_genscene_node(tree)
+    if class_node is None:
+        return False
+    for node in class_node.body:
+        if isinstance(node, ast.FunctionDef) and node.name == "voiceover":
+            return True
+    return False
+
+
 def _detect_play_antipatterns(tree: ast.AST) -> List[str]:
     errors: List[str] = []
     animation_vars = _collect_animation_variables(tree)
@@ -1332,6 +1385,14 @@ def validate_code(code: str, length: str, scene_plan: Dict[str, Any] | None = No
         base_names = _genscene_base_names(tree)
         if "VoiceoverScene" in base_names and not _has_voiceover_import(tree):
             errors.append("GenScene uses VoiceoverScene but is missing `from manim_voiceover import VoiceoverScene`")
+        if _genscene_uses_voiceover(tree):
+            has_init = _genscene_has_voiceover_init(tree)
+            has_custom_voiceover = _genscene_defines_voiceover_method(tree)
+            if not has_init and not has_custom_voiceover:
+                errors.append(
+                    "GenScene uses voiceover but does not initialize speech service; "
+                    "call self.set_speech_service(...) before self.voiceover(...)"
+                )
 
     errors.extend(_detect_play_antipatterns(tree))
     errors.extend(_detect_forbidden_unicode_math(tree))
@@ -1944,6 +2005,119 @@ def _auto_fix_2d_numpy_arrays(code: str) -> str:
     )
 
 
+def _auto_fix_voiceover_bootstrap(code: str) -> str:
+    """Ensure VoiceoverScene code initializes speech service in non-interactive environments.
+
+    manim-voiceover raises at runtime when `self.voiceover(...)` is used before
+    `self.set_speech_service(...)`. Generated code sometimes misses this. We
+    inject a lightweight fallback service that creates silent WAV files so
+    tracker.duration remains valid without extra dependencies.
+    """
+    normalized = (code or "").strip()
+    if not normalized:
+        return code
+
+    if "self.voiceover(" not in normalized and "VoiceoverScene" not in normalized:
+        return code
+
+    try:
+        tree = ast.parse(normalized)
+    except SyntaxError:
+        return code
+
+    base_names = _genscene_base_names(tree)
+    if "VoiceoverScene" not in base_names:
+        return code
+
+    # If code already initializes voiceover explicitly, keep it unchanged.
+    if "self.set_speech_service(" in normalized:
+        return code
+
+    lines = code.split("\n")
+    class_line_re = re.compile(r"^(\s*class\s+GenScene\s*\([^\)]*\)\s*:)")
+    construct_re = re.compile(r"^(\s*)def\s+construct\s*\(\s*self\s*\)\s*:")
+
+    class_index = -1
+    for i, line in enumerate(lines):
+        if class_line_re.match(line):
+            class_index = i
+            break
+    if class_index < 0:
+        return code
+
+    if "_InlineFallbackSpeechService" not in normalized:
+        helper_lines = [
+            "",
+            "class _InlineFallbackSpeechService:",
+            "    def __init__(self, cache_dir=None):",
+            "        import os",
+            "        from pathlib import Path",
+            "        base_dir = Path(cache_dir) if cache_dir else Path(config.media_dir) / 'voiceovers'",
+            "        os.makedirs(base_dir, exist_ok=True)",
+            "        self.cache_dir = str(base_dir)",
+            "",
+            "    @staticmethod",
+            "    def _estimate_duration(text):",
+            "        words = max(1, len(str(text).split()))",
+            "        return max(1.0, min(12.0, words * 0.42))",
+            "",
+            "    def _wrap_generate_from_text(self, text, **kwargs):",
+            "        import hashlib",
+            "        from pathlib import Path",
+            "        from pydub import AudioSegment",
+            "        duration = self._estimate_duration(text)",
+            "        digest = hashlib.sha1(str(text).encode('utf-8')).hexdigest()[:12]",
+            "        filename = f'fallback_{digest}.mp3'",
+            "        output_path = Path(self.cache_dir) / filename",
+            "        if not output_path.exists():",
+            "            silent = AudioSegment.silent(duration=max(1000, int(duration * 1000)))",
+            "            silent.export(output_path, format='mp3', bitrate='192k')",
+            "        return {",
+            "            'input_text': str(text),",
+            "            'final_audio': filename,",
+            "            'word_boundaries': [],",
+            "        }",
+            "",
+        ]
+        lines[class_index:class_index] = helper_lines
+        class_index += len(helper_lines)
+
+    construct_index = -1
+    construct_indent = 0
+    for j in range(class_index + 1, len(lines)):
+        match = construct_re.match(lines[j])
+        if match:
+            construct_index = j
+            construct_indent = len(match.group(1))
+            break
+    if construct_index < 0:
+        return "\n".join(lines)
+
+    body_indent = " " * (construct_indent + 4)
+    init_lines = [
+        f"{body_indent}if not hasattr(self, 'speech_service'):",
+        f"{body_indent}    self.set_speech_service(_InlineFallbackSpeechService(), create_subcaption=True)",
+    ]
+
+    insert_at = construct_index + 1
+    while insert_at < len(lines):
+        current = lines[insert_at]
+        if not current.strip():
+            insert_at += 1
+            continue
+        current_indent = len(current) - len(current.lstrip())
+        if current_indent <= construct_indent:
+            break
+        # Keep docstrings/comments at top of construct, inject after them.
+        if current.lstrip().startswith("#"):
+            insert_at += 1
+            continue
+        break
+
+    lines[insert_at:insert_at] = init_lines
+    return "\n".join(lines)
+
+
 def _auto_scale_timing(code: str, length: str) -> str:
     if not MANIM_AUTO_TIMESCALE_ENABLED:
         return code
@@ -2038,6 +2212,7 @@ def _apply_all_auto_fixes(code: str, length: str, scene_plan: Dict[str, Any] | N
     code = _auto_fix_showcreation(code)
     code = _auto_fix_group_to_vgroup(code)
     code = _auto_fix_2d_numpy_arrays(code)
+    code = _auto_fix_voiceover_bootstrap(code)
     code = _auto_scale_timing(code, length)
     code = _auto_pad_wait_calls(code, length)
     return code

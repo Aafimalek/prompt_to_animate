@@ -140,6 +140,24 @@ class GenScene(VoiceoverScene):
     assert any("missing `from manim_voiceover import VoiceoverScene`" in error for error in errors)
 
 
+def test_validate_code_requires_voiceover_service_initialization():
+    bad_code = """from manim import *
+from manim_voiceover import VoiceoverScene
+
+class GenScene(VoiceoverScene):
+    def construct(self):
+        with self.voiceover(text="Hello") as tracker:
+            self.wait(tracker.duration)
+        self.wait(1)
+        self.wait(1)
+        self.wait(1)
+        self.wait(1)
+        self.wait(1)
+"""
+    errors = llm_service.validate_code(bad_code, "Medium (15s)")
+    assert any("does not initialize speech service" in error for error in errors)
+
+
 def test_validate_code_detects_2d_array_added_to_3d_point():
     bad_code = """from manim import *
 import numpy as np
@@ -395,6 +413,28 @@ class GenScene(Scene):
     monkeypatch.setattr(llm_service, "MANIM_TIMELINE_PACING_ENABLED", True)
     patched = llm_service._auto_pad_wait_calls(code, "Extended (5m)")
     assert patched == code
+
+
+def test_auto_fix_voiceover_bootstrap_injects_fallback_service():
+    code = """from manim import *
+from manim_voiceover import VoiceoverScene
+
+class GenScene(VoiceoverScene):
+    def construct(self):
+        title = Text("Demo")
+        with self.voiceover(text="Voiceover line") as tracker:
+            self.play(Write(title), run_time=tracker.duration)
+        self.wait(1)
+        self.wait(1)
+        self.wait(1)
+        self.wait(1)
+        self.wait(1)
+"""
+    fixed = llm_service._auto_fix_voiceover_bootstrap(code)
+    assert "_InlineFallbackSpeechService" in fixed
+    assert "self.set_speech_service(_InlineFallbackSpeechService(), create_subcaption=True)" in fixed
+    errors = llm_service.validate_code(fixed, "Medium (15s)")
+    assert not any("does not initialize speech service" in error for error in errors)
 
 
 def test_infer_problem_scene_names_maps_issue_frames_to_scene_windows():

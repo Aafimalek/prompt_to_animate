@@ -21,6 +21,7 @@ Global structure requirements:
 - Avoid text overlap and clipping.
 - If voiceover_script.enabled=true, align section timing to narration chunks.
 - If voiceover_script.enabled=true, import `VoiceoverScene` from `manim_voiceover` and use `with self.voiceover(text=...) as tracker:` to synchronize animations and subtitles.
+- If voiceover_script.enabled=true, call `self.set_speech_service(...)` at the start of `construct()` before any `self.voiceover(...)` blocks (non-optional).
 
 Mandatory layout helper patterns:
 - Use frame-aware constants:

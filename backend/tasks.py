@@ -300,6 +300,7 @@ def process_video_generation(
             "video_url": video_url,
             "code": code,
             "chat_id": chat_id,
+            "scene_plan": scene_plan,
             "style_pack": resolved_style_pack,
             "quality_report": quality_report,
             "voiceover_script": voiceover_script,
@@ -312,6 +313,7 @@ def process_video_generation(
         }
         report_progress(redis_conn, job_id, 6, "complete", "Video ready!",
                       video_url=video_url, code=code, chat_id=chat_id,
+                      scene_plan=scene_plan,
                       style_pack=resolved_style_pack,
                       quality_report=quality_report,
                       voiceover_script=voiceover_script,

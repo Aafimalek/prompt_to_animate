@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 from datetime import datetime
 from bson import ObjectId
 from uuid import uuid4
@@ -22,7 +22,6 @@ from .s3_service import generate_cloudfront_signed_url
 from .database import connect_to_mongo, close_mongo_connection, get_chats_collection
 from .models import ChatResponse, ChatListResponse
 from .user_service import check_can_generate, get_user_usage, add_basic_credits, set_pro_subscription
-from .style_service import get_style_catalog
 from .export_service import build_interactive_manifest, build_manim_slides_outline
 from .scene_memory import record_quality_feedback, retrieve_scene_memories
 from .voiceover_service import script_to_voiceover_metadata
@@ -71,30 +70,11 @@ class AnimationRequest(BaseModel):
     length: str = "Medium (15s)"  # Default
     resolution: str = "720p"  # 720p, 1080p, 4k
     clerk_id: Optional[str] = None  # Clerk user ID for authenticated users
-    style_pack: Optional[str] = None
-    voiceover_mode: str = "none"
-    voiceover_text: Optional[str] = None
-    export_mode: str = "video"  # video | interactive | slides
 
 
 class AnimationResponse(BaseModel):
     video_url: str
     code: str
-
-
-class PartialRenderRequest(BaseModel):
-    code: str
-    resolution: str = "720p"
-    keep_sections: int = 1
-
-
-class SceneLayoutEditRequest(BaseModel):
-    code: str
-    length: str = "Medium (15s)"
-    edits: List[Dict[str, Any]]
-    resolution: str = "720p"
-    render_preview: bool = True
-    preview_sections: int = 1
 
 
 class InteractiveExportRequest(BaseModel):
@@ -188,12 +168,6 @@ async def generate_animation(request: AnimationRequest):
                 request.clerk_id or "anonymous",
                 job_id,
                 request.resolution,
-                {
-                    "style_pack": request.style_pack,
-                    "voiceover_mode": request.voiceover_mode,
-                    "voiceover_text": request.voiceover_text or "",
-                    "export_mode": request.export_mode,
-                },
             ),
             job_id=job_id,
             job_timeout=600,
@@ -282,12 +256,6 @@ async def generate_animation_stream(request: AnimationRequest):
                     request.clerk_id,
                     job_id,
                     request.resolution,
-                    {
-                        "style_pack": request.style_pack,
-                        "voiceover_mode": request.voiceover_mode,
-                        "voiceover_text": request.voiceover_text or "",
-                        "export_mode": request.export_mode,
-                    },
                 ),
                 job_id=job_id,
                 job_timeout=600,  # 10 minute timeout for long videos
@@ -569,75 +537,6 @@ async def payment_webhook(payload: WebhookPayload):
 
 
 # ============== Advanced Feature Endpoints ==============
-
-@app.get("/style-packs")
-async def get_style_packs():
-    """Return available visual style packs and design tokens."""
-    return get_style_catalog()
-
-
-@app.post("/scene-editor/partial-render")
-async def partial_render(request: PartialRenderRequest):
-    """
-    Render a quick partial preview by keeping only the first N code sections.
-    This powers interactive scene editing without full re-render cost.
-    """
-    try:
-        from .manim_service import execute_manim_code
-
-        _s3_key, local_filename = execute_manim_code(
-            code=request.code,
-            upload_to_s3=False,
-            resolution=request.resolution,
-            length="Medium (15s)",
-            preview_sections=request.keep_sections,
-        )
-        return {
-            "status": "ok",
-            "preview_url": f"http://localhost:8000/videos/{local_filename}",
-            "keep_sections": request.keep_sections,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/scene-editor/apply-layout")
-async def apply_layout_edits(request: SceneLayoutEditRequest):
-    """
-    Apply layout edits to existing Manim code and optionally return a quick preview render.
-    """
-    try:
-        from .llm_service import apply_scene_editor_layout_edits
-        from .manim_service import execute_manim_code
-
-        edited_code = await apply_scene_editor_layout_edits(
-            length=request.length,
-            bad_code=request.code,
-            edits=request.edits,
-        )
-        changed = edited_code.strip() != request.code.strip()
-
-        preview_url = ""
-        if request.render_preview:
-            keep_sections = max(1, int(request.preview_sections))
-            _s3_key, local_filename = execute_manim_code(
-                code=edited_code,
-                upload_to_s3=False,
-                resolution=request.resolution,
-                length=request.length,
-                preview_sections=keep_sections,
-            )
-            preview_url = f"http://localhost:8000/videos/{local_filename}"
-
-        return {
-            "status": "ok",
-            "code": edited_code,
-            "preview_url": preview_url,
-            "changed": changed,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/export/interactive")
 async def export_interactive(request: InteractiveExportRequest):

@@ -7,6 +7,7 @@ Hard requirements:
 - Fix every provided validation error.
 - Preserve style_pack and voiceover timing intent from scene plan metadata.
 - When VoiceoverScene is used, ensure `from manim_voiceover import VoiceoverScene` exists and voiceover blocks remain synchronized.
+- When voiceover blocks exist, ensure `self.set_speech_service(...)` is called before any `self.voiceover(...)` usage.
 
 Repair priority:
 1. Syntax and import/class correctness.
