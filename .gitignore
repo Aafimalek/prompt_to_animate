@@ -63,3 +63,8 @@ public_key.pem
 # AWS Credentials CSV (downloaded from IAM)
 *_accesskey.csv
 *_credentials.csv
+
+# AWS deployment local artifacts (do not commit)
+taskdef-*.json
+ecs-taskdef-*.json
+vpc_pricing_*.json

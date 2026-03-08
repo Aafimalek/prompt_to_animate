@@ -1,0 +1,10 @@
+.env
+.env.*
+private_key.pem
+backend/venv/
+venv/
+__pycache__/
+*.pyc
+.git
+.gitignore
+generated_animations/
