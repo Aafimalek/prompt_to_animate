@@ -1,56 +1,56 @@
-# ?? Manimancer
+# Manimancer
 
 > **Turn your ideas into high-quality educational animations with AI.**
 
-?? **Live Frontend:** [www.manimancer.fun](https://www.manimancer.fun)
+**Live Frontend:** [www.manimancer.fun](https://www.manimancer.fun)
 
 Manimancer is a full-stack prompt-to-video platform that transforms plain-English ideas into rendered Manim animations.  
 It combines a Next.js frontend, a FastAPI backend, Redis-backed RQ workers, Clerk authentication, MongoDB persistence, and S3/CloudFront video delivery.
 
 ---
 
-## ?? Table of Contents
+## Table of Contents
 
-- [? Features](#-features)
-- [?? Major Upgrades Implemented](#-major-upgrades-implemented)
-- [??? System Architecture](#?-system-architecture)
-- [?? Backend Architecture (Technical)](#-backend-architecture-technical)
-- [?? Redis + Worker Architecture (Technical)](#-redis--worker-architecture-technical)
-- [?? Authentication and Security Model](#-authentication-and-security-model)
-- [?? Plans, Credits, and Entitlement Enforcement](#-plans-credits-and-entitlement-enforcement)
-- [?? API Reference (Current)](#-api-reference-current)
-- [??? Tech Stack](#?-tech-stack)
-- [?? Project Structure](#-project-structure)
-- [?? Getting Started (Local)](#-getting-started-local)
-- [?? Docker Deployment (Local)](#-docker-deployment-local)
-- [?? Deployment Notes](#?-deployment-notes)
-- [?? Configuration Reference](#?-configuration-reference)
-- [?? Testing Checklist](#-testing-checklist)
-- [?? Troubleshooting](#-troubleshooting)
-- [? Documentation Accuracy Notes](#-documentation-accuracy-notes)
+- [Features](#features)
+- [Major Upgrades Implemented](#major-upgrades-implemented)
+- [System Architecture](#system-architecture)
+- [Backend Architecture (Technical)](#backend-architecture-technical)
+- [Redis + Worker Architecture (Technical)](#redis--worker-architecture-technical)
+- [Authentication and Security Model](#authentication-and-security-model)
+- [Plans, Credits, and Entitlement Enforcement](#plans-credits-and-entitlement-enforcement)
+- [API Reference (Current)](#api-reference-current)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Getting Started (Local)](#getting-started-local)
+- [Docker Deployment (Local)](#docker-deployment-local)
+- [Deployment Notes](#deployment-notes)
+- [Configuration Reference](#configuration-reference)
+- [Testing Checklist](#testing-checklist)
+- [Troubleshooting](#troubleshooting)
+- [Documentation Accuracy Notes](#documentation-accuracy-notes)
 
 ---
 
-## ? Features
+## Features
 
 | Feature | Description |
 |:--------|:------------|
-| ?? **AI-Powered Generation** | Prompt-to-Manim pipeline with multi-candidate generation, scoring, validation, and repair |
-| ? **Real-Time Progress (SSE)** | Live step-by-step updates (`analyzing ? composing ? generating ? validating ? rendering ? complete`) |
-| ?? **Tier-Aware Resolution Controls** | 720p / 1080p / 4k with server-enforced entitlement checks |
-| ?? **Length-Aware Generation** | Medium (15s), Long (1m), Deep Dive (2m), Extended (5m) |
-| ?? **Code Transparency** | Generated Manim code is returned and viewable in UI |
-| ?? **Authentication Required for Generation** | Anonymous users are blocked and prompted to sign in/up via Clerk modal |
-| ??? **Hardened API Security** | Clerk JWT verification (`iss`/`azp`/optional `aud`) + route-level authorization checks |
-| ?? **Rate Limiting** | Redis-backed per-user + per-IP throttling for generation and status endpoints |
-| ??? **Per-User History** | Chat/video/code metadata persisted in MongoDB |
-| ?? **Cloud Delivery** | Rendered videos uploaded to S3 and delivered via CloudFront signed URLs |
-| ?? **Queue-Based Scaling** | Redis + RQ decouple API responsiveness from render-heavy workloads |
-| ?? **Payments + Plan Upgrades** | Dodo Payments checkout/webhook flow updates usage entitlements |
+| **AI-Powered Generation** | Prompt-to-Manim pipeline with multi-candidate generation, scoring, validation, and repair |
+| **Real-Time Progress (SSE)** | Live step-by-step updates (`analyzing -> composing -> generating -> validating -> rendering -> complete`) |
+| **Tier-Aware Resolution Controls** | 720p / 1080p / 4k with server-enforced entitlement checks |
+| **Length-Aware Generation** | Medium (15s), Long (1m), Deep Dive (2m), Extended (5m) |
+| **Code Transparency** | Generated Manim code is returned and viewable in UI |
+| **Authentication Required for Generation** | Anonymous users are blocked and prompted to sign in/up via Clerk modal |
+| **Hardened API Security** | Clerk JWT verification (`iss`/`azp`/optional `aud`) + route-level authorization checks |
+| **Rate Limiting** | Redis-backed per-user + per-IP throttling for generation and status endpoints |
+| **Per-User History** | Chat/video/code metadata persisted in MongoDB |
+| **Cloud Delivery** | Rendered videos uploaded to S3 and delivered via CloudFront signed URLs |
+| **Queue-Based Scaling** | Redis + RQ decouple API responsiveness from render-heavy workloads |
+| **Payments + Plan Upgrades** | Dodo Payments checkout/webhook flow updates usage entitlements |
 
 ---
 
-## ?? Major Upgrades Implemented
+## Major Upgrades Implemented
 
 ### Product / UX Upgrades
 
@@ -89,7 +89,7 @@ It combines a Next.js frontend, a FastAPI backend, Redis-backed RQ workers, Cler
 
 ---
 
-## ??? System Architecture
+## System Architecture
 
 ### Production Topology (Current Direction)
 
@@ -108,22 +108,22 @@ It combines a Next.js frontend, a FastAPI backend, Redis-backed RQ workers, Cler
 
 ```mermaid
 flowchart TB
-    subgraph Browser["?? Browser"]
+    subgraph Browser["Browser"]
         FE["Next.js Frontend"]
     end
 
-    subgraph Backend["?? Backend Runtime"]
+    subgraph Backend["Backend Runtime"]
         API["FastAPI API"]
         AUTH["ClerkAuthMiddleware"]
         WKR["RQ Worker"]
     end
 
-    subgraph DataPlane["?? Data Plane"]
+    subgraph DataPlane["Data Plane"]
         REDIS[(Redis)]
         MONGO[(MongoDB)]
     end
 
-    subgraph Storage["?? Storage + CDN"]
+    subgraph Storage["Storage + CDN"]
         S3[(AWS S3)]
         CF["CloudFront"]
     end
@@ -147,15 +147,15 @@ flowchart TB
 
 ```mermaid
 sequenceDiagram
-    participant U as ?? User
-    participant F as ??? Frontend
-    participant A as ?? FastAPI
-    participant M as ?? Auth Middleware
-    participant R as ?? Redis
-    participant W as ?? Worker
-    participant L as ?? LLM Pipeline
-    participant N as ?? Manim
-    participant D as ??? MongoDB
+    participant U as User
+    participant F as Frontend
+    participant A as FastAPI
+    participant M as Auth Middleware
+    participant R as Redis
+    participant W as Worker
+    participant L as LLM Pipeline
+    participant N as Manim
+    participant D as MongoDB
 
     U->>F: Enter prompt + length + resolution
     F->>A: POST /generate-stream (Bearer token)
@@ -167,7 +167,7 @@ sequenceDiagram
 
     W->>R: Dequeue job
     W->>W: Entitlement re-check
-    W->>L: Compose ? generate ? validate ? repair
+    W->>L: Compose -> generate -> validate -> repair
     W->>N: Render animation
     N-->>W: MP4 artifact
     W->>D: Save chat metadata
@@ -180,7 +180,7 @@ sequenceDiagram
 
 ---
 
-## ?? Backend Architecture (Technical)
+## Backend Architecture (Technical)
 
 ### Core Modules
 
@@ -247,7 +247,7 @@ This avoids duplicate spam while preserving transitions inside same step.
 
 ---
 
-## ?? Redis + Worker Architecture (Technical)
+## Redis + Worker Architecture (Technical)
 
 ### Why Two Redis Client Modes Exist
 
@@ -311,7 +311,7 @@ stateDiagram-v2
 
 ---
 
-## ?? Authentication and Security Model
+## Authentication and Security Model
 
 ### AuthN Flow
 
@@ -361,7 +361,7 @@ Defaults from `auth.py`:
 
 ---
 
-## ?? Plans, Credits, and Entitlement Enforcement
+## Plans, Credits, and Entitlement Enforcement
 
 > This section reflects **backend-enforced truth** in `backend/user_service.py`.
 
@@ -407,7 +407,7 @@ This dual gate prevents stale queued-job abuse.
 
 ---
 
-## ?? API Reference (Current)
+## API Reference (Current)
 
 ### Base URLs
 
@@ -421,17 +421,17 @@ This dual gate prevents stale queued-job abuse.
 
 | Method | Path | Auth Required |
 |:-------|:-----|:--------------|
-| `POST` | `/generate-stream` | ? |
-| `POST` | `/generate` | ? |
-| `GET` | `/job/{job_id}/status` | ? |
-| `GET` | `/health` | ? |
+| `POST` | `/generate-stream` | Yes |
+| `POST` | `/generate` | Yes |
+| `GET` | `/job/{job_id}/status` | Yes |
+| `GET` | `/health` | No |
 
 ### User and Billing Endpoints
 
 | Method | Path | Auth Required |
 |:-------|:-----|:--------------|
-| `GET` | `/usage/{clerk_id}` | ? |
-| `POST` | `/webhook/payment` | ? (webhook/internal path) |
+| `GET` | `/usage/{clerk_id}` | Yes |
+| `POST` | `/webhook/payment` | No (webhook/internal path) |
 
 ### History + Collaboration Endpoints
 
@@ -497,7 +497,7 @@ This dual gate prevents stale queued-job abuse.
 
 ---
 
-## ??? Tech Stack
+## Tech Stack
 
 ### Frontend
 
@@ -536,7 +536,7 @@ This dual gate prevents stale queued-job abuse.
 
 ---
 
-## ?? Project Structure
+## Project Structure
 
 ```text
 prompt_to_animate/
@@ -546,43 +546,43 @@ prompt_to_animate/
 +-- docker-compose.yml
 +-- Dockerfile
 +-- generated_animations/
-¦
+|
 +-- backend/
-¦   +-- __init__.py
-¦   +-- main.py
-¦   +-- auth.py
-¦   +-- worker.py
-¦   +-- tasks.py
-¦   +-- redis_utils.py
-¦   +-- user_service.py
-¦   +-- llm_service.py
-¦   +-- manim_service.py
-¦   +-- database.py
-¦   +-- models.py
-¦   +-- prompts/
-¦   +-- tests/
-¦
+|   +-- __init__.py
+|   +-- main.py
+|   +-- auth.py
+|   +-- worker.py
+|   +-- tasks.py
+|   +-- redis_utils.py
+|   +-- user_service.py
+|   +-- llm_service.py
+|   +-- manim_service.py
+|   +-- database.py
+|   +-- models.py
+|   +-- prompts/
+|   +-- tests/
+|
 +-- frontend/
     +-- .env.local
     +-- app/
-    ¦   +-- layout.tsx
-    ¦   +-- page.tsx
-    ¦   +-- api/
-    ¦       +-- checkout/route.ts
-    ¦       +-- customer-portal/route.ts
-    ¦       +-- webhook/dodo/route.ts
+    |   +-- layout.tsx
+    |   +-- page.tsx
+    |   +-- api/
+    |       +-- checkout/route.ts
+    |       +-- customer-portal/route.ts
+    |       +-- webhook/dodo/route.ts
     +-- components/
-    ¦   +-- AnimationGenerator.tsx
-    ¦   +-- Sidebar.tsx
-    ¦   +-- PricingModal.tsx
-    ¦   +-- Navbar.tsx
-    ¦   +-- Footer.tsx
+    |   +-- AnimationGenerator.tsx
+    |   +-- Sidebar.tsx
+    |   +-- PricingModal.tsx
+    |   +-- Navbar.tsx
+    |   +-- Footer.tsx
     +-- lib/api.ts
 ```
 
 ---
 
-## ?? Getting Started (Local)
+## Getting Started (Local)
 
 ### Prerequisites
 
@@ -639,7 +639,7 @@ Open: `http://localhost:3000`
 
 ---
 
-## ?? Docker Deployment (Local)
+## Docker Deployment (Local)
 
 ### Quick Start
 
@@ -652,7 +652,7 @@ docker-compose up --build
 | Container | Purpose | Port |
 |:----------|:--------|:-----|
 | `pta-api` | FastAPI API service | `8000` |
-| `pta-worker` | Background RQ worker | — |
+| `pta-worker` | Background RQ worker | - |
 | `pta-redis` | Queue + counters store | `6379` |
 | `pta-mongo` | MongoDB persistence | `27017` |
 | `pta-redis-ui` | Optional Redis Commander | `8081` |
@@ -674,7 +674,7 @@ flowchart LR
 
 ---
 
-## ?? Deployment Notes
+## Deployment Notes
 
 ### Frontend
 
@@ -694,7 +694,7 @@ For AWS production rollout details, use:
 
 ---
 
-## ?? Configuration Reference
+## Configuration Reference
 
 ### Backend Security Variables
 
@@ -750,7 +750,7 @@ DODO_PAYMENTS_ENVIRONMENT=test_mode
 
 ---
 
-## ?? Testing Checklist
+## Testing Checklist
 
 ### Core Runtime
 
@@ -773,7 +773,7 @@ DODO_PAYMENTS_ENVIRONMENT=test_mode
 
 ---
 
-## ?? Troubleshooting
+## Troubleshooting
 
 | Symptom | Likely Cause | Fix |
 |:--------|:-------------|:----|
@@ -788,7 +788,7 @@ DODO_PAYMENTS_ENVIRONMENT=test_mode
 
 ---
 
-## ? Documentation Accuracy Notes
+## Documentation Accuracy Notes
 
 This README is aligned with current implementation in:
 
